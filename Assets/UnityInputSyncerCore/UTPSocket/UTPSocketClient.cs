@@ -227,10 +227,10 @@ namespace UnityInputSyncerCore.UTPSocket
         {
             if (jsonCallbacks.ContainsKey(eventName))
             {
-                var jObject = JObject.Parse(json);
+                var jToken = JToken.Parse(json);
                 foreach (var callback in jsonCallbacks[eventName])
                 {
-                    callback(jObject);
+                    callback(jToken);
                 }
             }
         }
@@ -358,12 +358,12 @@ namespace UnityInputSyncerCore.UTPSocket
         // -------------------------
         // EVENT LISTENERS
         // -------------------------
-        private Dictionary<string, List<Action<JObject>>> jsonCallbacks = new Dictionary<string, List<Action<JObject>>>();
-        public void On(string eventName, Action<JObject> callback)
+        private Dictionary<string, List<Action<JToken>>> jsonCallbacks = new Dictionary<string, List<Action<JToken>>>();
+        public void On(string eventName, Action<JToken> callback)
         {
             if (!jsonCallbacks.ContainsKey(eventName))
             {
-                jsonCallbacks.Add(eventName, new List<Action<JObject>>());
+                jsonCallbacks.Add(eventName, new List<Action<JToken>>());
             }
 
             jsonCallbacks[eventName].Add(callback);

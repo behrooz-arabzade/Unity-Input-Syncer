@@ -195,7 +195,7 @@ namespace UnityInputSyncerClient
                 return;
             }
 
-            Driver.Emit(InputSyncerEvents.MATCH_USER_JOIN_EVENT);
+            Driver.Emit(InputSyncerEvents.MATCH_USER_JOIN_EVENT, new { userId });
         }
 
         public InputSyncerState GetState()

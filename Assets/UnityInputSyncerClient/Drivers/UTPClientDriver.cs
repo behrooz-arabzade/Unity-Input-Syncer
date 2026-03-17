@@ -154,7 +154,7 @@ namespace UnityInputSyncerClient.Drivers
 
         public override T GetData<T>(ConnectionResponse response)
         {
-            JObject data = (JObject)response.data;
+            JToken data = (JToken)response.data;
             return data.ToObject<T>();
         }
 
