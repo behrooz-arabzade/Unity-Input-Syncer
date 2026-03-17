@@ -1,4 +1,9 @@
 ﻿<Solution>
-  <Project Path="Assembly-CSharp.csproj" />
+  <Project Path="UnityInputSyncerUTPServer.csproj" />
+  <Project Path="UnityInputSyncerCore.csproj" />
+  <Project Path="UnityInputSyncerClient.csproj" />
   <Project Path="Assembly-CSharp-Editor.csproj" />
+  <Project Path="PlayModeTests.csproj" />
+  <Project Path="Assembly-CSharp.csproj" />
+  <Project Path="EditModeTests.csproj" />
 </Solution>

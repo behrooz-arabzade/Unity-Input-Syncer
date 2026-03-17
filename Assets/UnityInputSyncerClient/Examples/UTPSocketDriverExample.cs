@@ -112,7 +112,7 @@ namespace UnityInputSyncerClient.Examples
 
             foreach (var input in inputs)
             {
-                Debug.Log($"Received input for step 1: UserId={input.UserId}, InputData={JsonUtility.ToJson(input.InputData)}");
+                Debug.Log($"Received input for step 1: {input}");
             }
         }
     }

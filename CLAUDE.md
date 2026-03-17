@@ -64,9 +64,29 @@ Client SDK for game code to consume:
 
 ## Build & Development
 
-This is a Unity project — open in Unity 6 (6000.3.0f1+). There is no standalone build system or CLI test runner. All code compiles within the Unity editor as part of the default `Assembly-CSharp`.
+This is a Unity project — open in Unity 6 (6000.3.0f1+). There is no standalone build system or CLI test runner.
 
-No assembly definitions (`.asmdef`) are used for project code — everything compiles into the default assembly.
+Assembly definitions (`.asmdef`) are used for each source folder and for tests:
+- `Assets/UnityInputSyncerCore/UnityInputSyncerCore.asmdef`
+- `Assets/UnityInputSyncerClient/UnityInputSyncerClient.asmdef`
+- `Assets/UnityInputSyncerUTPServer/UnityInputSyncerUTPServer.asmdef`
+- `Assets/Tests/EditMode/EditModeTests.asmdef` — Edit Mode tests (editor only)
+- `Assets/Tests/PlayMode/PlayModeTests.asmdef` — Play Mode tests
+
+## Testing
+
+Tests use Unity Test Framework (v1.6.0). Run from terminal via `make`:
+
+```bash
+make test          # run all tests (edit mode + play mode)
+make test-edit     # edit mode tests only
+make test-play     # play mode tests only
+```
+
+Or via **Window > General > Test Runner** in the Unity Editor.
+
+- **Edit Mode tests** (`Assets/Tests/EditMode/`) — Pure logic tests that run in the editor without entering Play Mode.
+- **Play Mode tests** (`Assets/Tests/PlayMode/`) — Tests that run inside Play Mode, useful for async/coroutine-based code.
 
 ## Conventions
 
