@@ -78,7 +78,9 @@ namespace UnityInputSyncerClient.Tests
 
         public override T GetData<T>(NativeArray<byte> response)
         {
-            throw new NotImplementedException("TestClientDriver does not support binary deserialization.");
+            T instance = new T();
+            instance.FromNativeBytes(response);
+            return instance;
         }
 
         /// <summary>

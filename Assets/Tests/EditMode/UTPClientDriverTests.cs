@@ -5,6 +5,7 @@ using UnityEngine;
 using UnityEngine.TestTools;
 using UnityInputSyncerClient;
 using UnityInputSyncerClient.Drivers;
+using UnityInputSyncerClient.Tests;
 
 namespace Tests.EditMode
 {
@@ -22,20 +23,41 @@ namespace Tests.EditMode
         }
 
         [Test]
-        public void BinaryGetData_ThrowsNotImplementedException()
+        public void BinaryGetData_DeserializesFromNativeArray()
         {
             var driver = new UTPClientDriver(new UTPDriverOptions
             {
                 Ip = "127.0.0.1",
                 Port = 9999
             });
-            var data = new NativeArray<byte>(0, Allocator.Temp);
-            LogAssert.Expect(LogType.Error, "UTP driver does not support binary data deserialization.");
-            Assert.Throws<NotImplementedException>(() =>
+
+            var original = new TestBinaryData { IntValue = 12345, ByteValue = 42 };
+            var bytes = original.ToNativeBytes(Allocator.Temp);
+
+            var result = driver.GetData<TestBinaryData>(bytes);
+
+            Assert.AreEqual(12345, result.IntValue);
+            Assert.AreEqual(42, result.ByteValue);
+            bytes.Dispose();
+        }
+
+        [Test]
+        public void BinaryGetData_RoundTrips_WithEdgeValues()
+        {
+            var driver = new UTPClientDriver(new UTPDriverOptions
             {
-                driver.GetData<string>(data);
+                Ip = "127.0.0.1",
+                Port = 9999
             });
-            data.Dispose();
+
+            var original = new TestBinaryData { IntValue = int.MaxValue, ByteValue = 255 };
+            var bytes = original.ToNativeBytes(Allocator.Temp);
+
+            var result = driver.GetData<TestBinaryData>(bytes);
+
+            Assert.AreEqual(int.MaxValue, result.IntValue);
+            Assert.AreEqual(255, result.ByteValue);
+            bytes.Dispose();
         }
 
         [Test]

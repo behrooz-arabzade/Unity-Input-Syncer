@@ -126,8 +126,8 @@ namespace UnityInputSyncerClient.Drivers
 
         public override bool Emit(int eventId, INativeArraySerializable data = null, ClientDriverEmitChannel channel = ClientDriverEmitChannel.Reliable)
         {
-            Debug.LogError("Socket.IO driver does not support binary data events.");
-            throw new NotImplementedException();
+            throw new NotSupportedException(
+                "Socket.IO transport does not support binary events. Use the UTP driver for binary event support.");
         }
 
         public override T GetData<T>(ConnectionResponse response)
@@ -163,14 +163,14 @@ namespace UnityInputSyncerClient.Drivers
 
         public override void On(int eventId, Action<NativeArray<byte>> callback)
         {
-            Debug.LogError("Socket.IO driver does not support binary data events.");
-            throw new NotImplementedException();
+            throw new NotSupportedException(
+                "Socket.IO transport does not support binary events. Use the UTP driver for binary event support.");
         }
 
         public override T GetData<T>(NativeArray<byte> response)
         {
-            Debug.LogError("Socket.IO driver does not support binary data events.");
-            throw new NotImplementedException();
+            throw new NotSupportedException(
+                "Socket.IO transport does not support binary events. Use the UTP driver for binary event support.");
         }
     }
 

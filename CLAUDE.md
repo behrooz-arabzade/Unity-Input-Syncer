@@ -124,7 +124,7 @@ Tracked steps to complete the project. Update this list as requirements are adde
 
 - [x] **Step 1: Create a Ready-Made Dedicated Server Scene** — `Assets/Scenes/DedicatedServerScene.unity` with `DedicatedServerBootstrap` component. *(Requirement #6)*
 - [x] **Step 2: Add Environment Variable Configuration for the Server** — `DedicatedServerBootstrap` reads `INPUT_SYNCER_*` env vars in `Awake()` to override Inspector defaults. *(Requirement #6)*
-- [ ] **Step 3: Implement Binary Data Deserialization on the Client** — `UTPClientDriver.GetData<T>(NativeArray<byte>)` throws `NotImplementedException`. Binary events can be sent but not received/deserialized. Need to implement `INativeArraySerializable` deserialization path. *(Requirement #8)*
+- [x] **Step 3: Implement Binary Data Deserialization on the Client** — `UTPClientDriver.GetData<T>(NativeArray<byte>)` throws `NotImplementedException`. Binary events can be sent but not received/deserialized. Need to implement `INativeArraySerializable` deserialization path. *(Requirement #8)*
 - [ ] **Step 4: Implement Socket.IO Binary Event Support (or document limitation)** — `SocketIODriver.EmitBinary()` and `OnBinary()` both throw `NotImplementedException`. Either implement or explicitly document as unsupported with a clearer error message. *(Requirement #8)*
 - [ ] **Step 5: Add Server-Side Simulation Example** — The architecture supports server-side simulation but no example scene, script, or documentation demonstrates how to set it up. *(Requirement #7)*
 - [ ] **Step 6: Fill Test Gaps** — Add tests for: binary deserialization (once implemented), env var config, mock mode edge cases, reconnection flows.

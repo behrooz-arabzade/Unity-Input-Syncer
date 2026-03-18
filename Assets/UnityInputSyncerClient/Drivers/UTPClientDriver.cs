@@ -189,8 +189,9 @@ namespace UnityInputSyncerClient.Drivers
 
         public override T GetData<T>(NativeArray<byte> response)
         {
-            Debug.LogError("UTP driver does not support binary data deserialization.");
-            throw new NotImplementedException();
+            T instance = new T();
+            instance.FromNativeBytes(response);
+            return instance;
         }
     }
 

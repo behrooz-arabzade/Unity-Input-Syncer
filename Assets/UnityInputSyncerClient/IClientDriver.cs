@@ -15,7 +15,7 @@ namespace UnityInputSyncerClient
         public abstract void On(string eventName, Action<ConnectionResponse> callback);
         public abstract void On(int eventId, Action<NativeArray<byte>> callback);
         public abstract T GetData<T>(ConnectionResponse response);
-        public abstract T GetData<T>(NativeArray<byte> response);
+        public abstract T GetData<T>(NativeArray<byte> response) where T : INativeArraySerializable, new();
 
         public Action OnConnected = () => { };
         public Action OnReconnected = () => { };

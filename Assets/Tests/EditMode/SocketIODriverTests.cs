@@ -1,10 +1,9 @@
 using System;
 using NUnit.Framework;
 using Unity.Collections;
-using UnityEngine;
-using UnityEngine.TestTools;
 using UnityInputSyncerClient;
 using UnityInputSyncerClient.Drivers;
+using UnityInputSyncerClient.Tests;
 
 namespace Tests.EditMode
 {
@@ -18,36 +17,33 @@ namespace Tests.EditMode
         }
 
         [Test]
-        public void BinaryEmit_ThrowsNotImplementedException()
+        public void BinaryEmit_ThrowsNotSupportedException()
         {
             var driver = new SocketIODriver();
-            LogAssert.Expect(LogType.Error, "Socket.IO driver does not support binary data events.");
-            Assert.Throws<NotImplementedException>(() =>
+            Assert.Throws<NotSupportedException>(() =>
             {
                 driver.Emit(1, null, ClientDriverEmitChannel.Reliable);
             });
         }
 
         [Test]
-        public void BinaryOn_ThrowsNotImplementedException()
+        public void BinaryOn_ThrowsNotSupportedException()
         {
             var driver = new SocketIODriver();
-            LogAssert.Expect(LogType.Error, "Socket.IO driver does not support binary data events.");
-            Assert.Throws<NotImplementedException>(() =>
+            Assert.Throws<NotSupportedException>(() =>
             {
                 driver.On(1, (data) => { });
             });
         }
 
         [Test]
-        public void BinaryGetData_ThrowsNotImplementedException()
+        public void BinaryGetData_ThrowsNotSupportedException()
         {
             var driver = new SocketIODriver();
             var data = new NativeArray<byte>(0, Allocator.Temp);
-            LogAssert.Expect(LogType.Error, "Socket.IO driver does not support binary data events.");
-            Assert.Throws<NotImplementedException>(() =>
+            Assert.Throws<NotSupportedException>(() =>
             {
-                driver.GetData<string>(data);
+                driver.GetData<TestBinaryData>(data);
             });
             data.Dispose();
         }
