@@ -1,5 +1,6 @@
 using System;
 using NUnit.Framework;
+using UnityEngine;
 using UnityInputSyncerUTPServer;
 
 namespace Tests.EditMode
@@ -13,6 +14,18 @@ namespace Tests.EditMode
         public void TearDown()
         {
             Environment.SetEnvironmentVariable(TestVar, null);
+            ClearBootstrapEnvVars();
+        }
+
+        private static void ClearBootstrapEnvVars()
+        {
+            Environment.SetEnvironmentVariable("INPUT_SYNCER_PORT", null);
+            Environment.SetEnvironmentVariable("INPUT_SYNCER_MAX_PLAYERS", null);
+            Environment.SetEnvironmentVariable("INPUT_SYNCER_AUTO_START_WHEN_FULL", null);
+            Environment.SetEnvironmentVariable("INPUT_SYNCER_STEP_INTERVAL", null);
+            Environment.SetEnvironmentVariable("INPUT_SYNCER_ALLOW_LATE_JOIN", null);
+            Environment.SetEnvironmentVariable("INPUT_SYNCER_SEND_HISTORY_ON_LATE_JOIN", null);
+            Environment.SetEnvironmentVariable("INPUT_SYNCER_HEARTBEAT_TIMEOUT", null);
         }
 
         // =========================================================
@@ -214,6 +227,64 @@ namespace Tests.EditMode
         {
             Environment.SetEnvironmentVariable(TestVar, "");
             Assert.IsFalse(DedicatedServerBootstrap.TryGetEnvFloat(TestVar, out _));
+        }
+
+        // =========================================================
+        // ApplyEnvironmentOverrides applies env vars to config
+        // =========================================================
+
+        [Test]
+        public void ApplyEnvironmentOverrides_AppliesPortAndMaxPlayers()
+        {
+            ClearBootstrapEnvVars();
+            try
+            {
+                Environment.SetEnvironmentVariable("INPUT_SYNCER_PORT", "8888");
+                Environment.SetEnvironmentVariable("INPUT_SYNCER_MAX_PLAYERS", "4");
+
+                var go = new GameObject();
+                var bootstrap = go.AddComponent<DedicatedServerBootstrap>();
+                bootstrap.ApplyEnvironmentOverrides();
+
+                Assert.AreEqual((ushort)8888, bootstrap.ConfigPort);
+                Assert.AreEqual(4, bootstrap.ConfigMaxPlayers);
+
+                UnityEngine.Object.DestroyImmediate(go);
+            }
+            finally
+            {
+                ClearBootstrapEnvVars();
+            }
+        }
+
+        [Test]
+        public void ApplyEnvironmentOverrides_AppliesBoolAndFloatOptions()
+        {
+            ClearBootstrapEnvVars();
+            try
+            {
+                Environment.SetEnvironmentVariable("INPUT_SYNCER_AUTO_START_WHEN_FULL", "false");
+                Environment.SetEnvironmentVariable("INPUT_SYNCER_STEP_INTERVAL", "0.05");
+                Environment.SetEnvironmentVariable("INPUT_SYNCER_ALLOW_LATE_JOIN", "true");
+                Environment.SetEnvironmentVariable("INPUT_SYNCER_SEND_HISTORY_ON_LATE_JOIN", "false");
+                Environment.SetEnvironmentVariable("INPUT_SYNCER_HEARTBEAT_TIMEOUT", "30");
+
+                var go = new GameObject();
+                var bootstrap = go.AddComponent<DedicatedServerBootstrap>();
+                bootstrap.ApplyEnvironmentOverrides();
+
+                Assert.IsFalse(bootstrap.ConfigAutoStartWhenFull);
+                Assert.AreEqual(0.05f, bootstrap.ConfigStepIntervalSeconds, 0.001f);
+                Assert.IsTrue(bootstrap.ConfigAllowLateJoin);
+                Assert.IsFalse(bootstrap.ConfigSendStepHistoryOnLateJoin);
+                Assert.AreEqual(30f, bootstrap.ConfigHeartbeatTimeout, 0.001f);
+
+                UnityEngine.Object.DestroyImmediate(go);
+            }
+            finally
+            {
+                ClearBootstrapEnvVars();
+            }
         }
     }
 }

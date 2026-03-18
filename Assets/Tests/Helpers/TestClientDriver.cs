@@ -97,5 +97,13 @@ namespace UnityInputSyncerClient.Tests
                 callback(response);
             }
         }
+
+        /// <summary>
+        /// Simulates reconnection: invokes OnReconnected so tests can assert the contract.
+        /// </summary>
+        public void SimulateReconnect()
+        {
+            OnReconnected?.Invoke();
+        }
     }
 }

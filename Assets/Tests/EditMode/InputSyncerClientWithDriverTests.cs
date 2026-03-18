@@ -236,5 +236,43 @@ namespace Tests.EditMode
 
             Assert.AreEqual(1, matchStartedCount);
         }
+
+        [Test]
+        public void MockClient_DoubleDispose_DoesNotThrow()
+        {
+            var mockClient = new InputSyncerClient(null, new InputSyncerClientOptions { Mock = true });
+            Assert.DoesNotThrow(() =>
+            {
+                mockClient.Dispose();
+                mockClient.Dispose();
+            });
+        }
+
+        [Test]
+        public void MockClient_OperationsAfterDispose_DoNotThrow()
+        {
+            var mockClient = new InputSyncerClient(null, new InputSyncerClientOptions { Mock = true });
+            mockClient.Dispose();
+
+            Assert.DoesNotThrow(() => mockClient.SendInput(new TestInput(new TestInputData { action = "a", value = 1 })));
+            Assert.DoesNotThrow(() => mockClient.JoinMatch("user"));
+            Assert.DoesNotThrow(() =>
+            {
+                var task = mockClient.ConnectAsync();
+                task.Wait(500);
+            });
+        }
+
+        [Test]
+        public void Driver_SimulateReconnect_InvokesOnReconnected()
+        {
+            var testDriver = new TestClientDriver();
+            bool reconnectedFired = false;
+            testDriver.OnReconnected += () => reconnectedFired = true;
+
+            testDriver.SimulateReconnect();
+
+            Assert.IsTrue(reconnectedFired, "OnReconnected should be invoked when driver simulates reconnect");
+        }
     }
 }

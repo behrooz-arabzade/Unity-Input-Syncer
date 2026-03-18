@@ -22,6 +22,15 @@ namespace UnityInputSyncerUTPServer
 
         public InputSyncerServer Server => server;
 
+        // Internal for tests: read config after ApplyEnvironmentOverrides (e.g. after Awake).
+        internal ushort ConfigPort => port;
+        internal int ConfigMaxPlayers => maxPlayers;
+        internal bool ConfigAutoStartWhenFull => autoStartWhenFull;
+        internal float ConfigStepIntervalSeconds => stepIntervalSeconds;
+        internal bool ConfigAllowLateJoin => allowLateJoin;
+        internal bool ConfigSendStepHistoryOnLateJoin => sendStepHistoryOnLateJoin;
+        internal float ConfigHeartbeatTimeout => heartbeatTimeout;
+
         void Awake()
         {
             ApplyEnvironmentOverrides();
@@ -54,7 +63,7 @@ namespace UnityInputSyncerUTPServer
             server?.Dispose();
         }
 
-        private void ApplyEnvironmentOverrides()
+        internal void ApplyEnvironmentOverrides()
         {
             if (TryGetEnvUShort("INPUT_SYNCER_PORT", out var envPort))
                 port = envPort;
