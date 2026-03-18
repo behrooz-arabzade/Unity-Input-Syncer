@@ -88,6 +88,26 @@ Or via **Window > General > Test Runner** in the Unity Editor.
 - **Edit Mode tests** (`Assets/Tests/EditMode/`) — Pure logic tests that run in the editor without entering Play Mode.
 - **Play Mode tests** (`Assets/Tests/PlayMode/`) — Tests that run inside Play Mode, useful for async/coroutine-based code.
 
+## Dedicated Server
+
+A ready-made server scene is at `Assets/Scenes/DedicatedServerScene.unity`. It contains a single GameObject with `DedicatedServerBootstrap`, which starts `InputSyncerServer` automatically.
+
+**Building:** `make build-server` produces a headless macOS server build in `Builds/Server/`.
+
+**Configuration:** All options can be set via Inspector or overridden with environment variables at runtime:
+
+| Env Var | Type | Default | Description |
+|---|---|---|---|
+| `INPUT_SYNCER_PORT` | ushort | 7777 | Server listen port |
+| `INPUT_SYNCER_MAX_PLAYERS` | int | 2 | Max connected players |
+| `INPUT_SYNCER_AUTO_START_WHEN_FULL` | bool | true | Start match when lobby is full |
+| `INPUT_SYNCER_STEP_INTERVAL` | float | 0.1 | Seconds between step broadcasts |
+| `INPUT_SYNCER_ALLOW_LATE_JOIN` | bool | false | Allow joining after match start |
+| `INPUT_SYNCER_SEND_HISTORY_ON_LATE_JOIN` | bool | true | Send step history to late joiners |
+| `INPUT_SYNCER_HEARTBEAT_TIMEOUT` | float | 15 | Seconds before disconnecting idle clients |
+
+Bool values accept `true`/`false` or `1`/`0`. The `Server` property on `DedicatedServerBootstrap` is public for server-side simulation access.
+
 ## Conventions
 
 - Transport-layer ticking uses `PlayerLoopHook` (injected into Unity's player loop), not MonoBehaviour `Update()`. Only use MonoBehaviour for scene-bound components.
@@ -99,8 +119,8 @@ Or via **Window > General > Test Runner** in the Unity Editor.
 
 Tracked steps to complete the project. Update this list as requirements are added or completed.
 
-- [ ] **Step 1: Create a Ready-Made Dedicated Server Scene** — No pre-configured server scene exists in `Assets/Scenes/`. Only `InputSyncerServerExample.cs` exists as example code. Need a Unity scene with server components pre-wired, ready to build as a dedicated server. *(Requirement #6)*
-- [ ] **Step 2: Add Environment Variable Configuration for the Server** — `InputSyncerServerOptions` has hardcoded defaults only. Need env var parsing (e.g., `PORT`, `MAX_PLAYERS`, `STEP_INTERVAL`, `AUTO_START_WHEN_FULL`) so the dedicated server build can be configured without recompilation. *(Requirement #6)*
+- [x] **Step 1: Create a Ready-Made Dedicated Server Scene** — `Assets/Scenes/DedicatedServerScene.unity` with `DedicatedServerBootstrap` component. *(Requirement #6)*
+- [x] **Step 2: Add Environment Variable Configuration for the Server** — `DedicatedServerBootstrap` reads `INPUT_SYNCER_*` env vars in `Awake()` to override Inspector defaults. *(Requirement #6)*
 - [ ] **Step 3: Implement Binary Data Deserialization on the Client** — `UTPClientDriver.GetData<T>(NativeArray<byte>)` throws `NotImplementedException`. Binary events can be sent but not received/deserialized. Need to implement `INativeArraySerializable` deserialization path. *(Requirement #8)*
 - [ ] **Step 4: Implement Socket.IO Binary Event Support (or document limitation)** — `SocketIODriver.EmitBinary()` and `OnBinary()` both throw `NotImplementedException`. Either implement or explicitly document as unsupported with a clearer error message. *(Requirement #8)*
 - [ ] **Step 5: Add Server-Side Simulation Example** — The architecture supports server-side simulation but no example scene, script, or documentation demonstrates how to set it up. *(Requirement #7)*

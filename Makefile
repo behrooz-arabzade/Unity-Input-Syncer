@@ -2,7 +2,7 @@ UNITY := /Applications/Unity/Hub/Editor/6000.3.0f1/Unity.app/Contents/MacOS/Unit
 PROJECT := $(CURDIR)
 RESULTS_DIR := /tmp
 
-.PHONY: test test-edit test-play
+.PHONY: test test-edit test-play build-server
 
 test: test-edit test-play
 
@@ -17,3 +17,11 @@ test-play:
 		-projectPath "$(PROJECT)" \
 		-testPlatform PlayMode \
 		-testResults $(RESULTS_DIR)/playmode-results.xml
+
+build-server:
+	$(UNITY) -batchmode -nographics \
+		-projectPath "$(PROJECT)" \
+		-buildTarget StandaloneOSX \
+		-standaloneBuildSubtarget Server \
+		-buildOutput "$(CURDIR)/Builds/Server" \
+		-quit
