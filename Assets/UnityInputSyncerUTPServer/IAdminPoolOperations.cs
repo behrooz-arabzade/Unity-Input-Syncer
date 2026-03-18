@@ -14,6 +14,8 @@ namespace UnityInputSyncerUTPServer
         public bool MatchStarted;
         public bool MatchFinished;
         public DateTime CreatedAt;
+        public int CurrentStep;
+        public double UptimeSeconds;
     }
 
     public class AdminCreateInstanceRequest
@@ -25,6 +27,13 @@ namespace UnityInputSyncerUTPServer
         public bool? SendStepHistoryOnLateJoin;
     }
 
+    public class AdminResourceUsage
+    {
+        public long ManagedMemoryBytes;
+        public long WorkingSetBytes;
+        public int ProcessorCount;
+    }
+
     public class AdminPoolStats
     {
         public int TotalInstances;
@@ -33,6 +42,8 @@ namespace UnityInputSyncerUTPServer
         public int WaitingCount;
         public int InMatchCount;
         public int FinishedCount;
+        public List<AdminInstanceInfo> Instances;
+        public AdminResourceUsage ResourceUsage;
     }
 
     public class AdminResponse

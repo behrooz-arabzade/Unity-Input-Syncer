@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Threading.Tasks;
 using UnityInputSyncerCore.Utils;
@@ -75,6 +76,17 @@ namespace UnityInputSyncerUTPServer
             return UnityThreadDispatcher.RunOnMainThreadAsync(() =>
             {
                 var all = pool.GetAllInstances();
+
+                long workingSetBytes = 0;
+                try
+                {
+                    workingSetBytes = Process.GetCurrentProcess().WorkingSet64;
+                }
+                catch
+                {
+                    // May not be available on all platforms
+                }
+
                 return new AdminPoolStats
                 {
                     TotalInstances = all.Count,
@@ -83,6 +95,13 @@ namespace UnityInputSyncerUTPServer
                     WaitingCount = all.Count(i => i.State == ServerInstanceState.WaitingForPlayers),
                     InMatchCount = all.Count(i => i.State == ServerInstanceState.InMatch),
                     FinishedCount = all.Count(i => i.State == ServerInstanceState.Finished),
+                    Instances = all.Select(MapToInfo).ToList(),
+                    ResourceUsage = new AdminResourceUsage
+                    {
+                        ManagedMemoryBytes = GC.GetTotalMemory(false),
+                        WorkingSetBytes = workingSetBytes,
+                        ProcessorCount = Environment.ProcessorCount,
+                    },
                 };
             });
         }
@@ -99,6 +118,8 @@ namespace UnityInputSyncerUTPServer
                 MatchStarted = instance.Server.IsMatchStarted,
                 MatchFinished = instance.Server.IsMatchFinished,
                 CreatedAt = instance.CreatedAt,
+                CurrentStep = instance.Server.GetState().CurrentStep,
+                UptimeSeconds = (DateTime.UtcNow - instance.CreatedAt).TotalSeconds,
             };
         }
     }

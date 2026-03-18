@@ -227,6 +227,90 @@ namespace Tests.EditMode
             Assert.AreEqual(1, json["idleCount"].Value<int>());
         }
 
+        [Test]
+        public async Task GetStats_IncludesInstances_WhenPopulated()
+        {
+            mockPool.Stats = new AdminPoolStats
+            {
+                TotalInstances = 1,
+                AvailableSlots = 9,
+                Instances = new System.Collections.Generic.List<AdminInstanceInfo>
+                {
+                    new AdminInstanceInfo
+                    {
+                        Id = "inst-1",
+                        Port = 7778,
+                        State = "InMatch",
+                        PlayerCount = 2,
+                        JoinedPlayerCount = 2,
+                        MatchStarted = true,
+                        MatchFinished = false,
+                        CreatedAt = System.DateTime.UtcNow,
+                        CurrentStep = 142,
+                        UptimeSeconds = 85.3,
+                    }
+                },
+            };
+
+            var ctrl = CreateController();
+            var response = await ctrl.HandleRequestAsync("GET", "/api/stats", null);
+
+            Assert.AreEqual(200, response.StatusCode);
+            var json = JObject.Parse(response.Body);
+            var instances = json["instances"] as JArray;
+            Assert.IsNotNull(instances);
+            Assert.AreEqual(1, instances.Count);
+            Assert.AreEqual("inst-1", instances[0]["id"].ToString());
+            Assert.AreEqual(142, instances[0]["currentStep"].Value<int>());
+            Assert.AreEqual(85.3, instances[0]["uptimeSeconds"].Value<double>(), 0.01);
+        }
+
+        [Test]
+        public async Task GetStats_IncludesResourceUsage_WhenPopulated()
+        {
+            mockPool.Stats = new AdminPoolStats
+            {
+                TotalInstances = 0,
+                ResourceUsage = new AdminResourceUsage
+                {
+                    ManagedMemoryBytes = 52428800,
+                    WorkingSetBytes = 134217728,
+                    ProcessorCount = 8,
+                },
+            };
+
+            var ctrl = CreateController();
+            var response = await ctrl.HandleRequestAsync("GET", "/api/stats", null);
+
+            Assert.AreEqual(200, response.StatusCode);
+            var json = JObject.Parse(response.Body);
+            var resource = json["resourceUsage"];
+            Assert.IsNotNull(resource);
+            Assert.AreEqual(52428800, resource["managedMemoryBytes"].Value<long>());
+            Assert.AreEqual(134217728, resource["workingSetBytes"].Value<long>());
+            Assert.AreEqual(8, resource["processorCount"].Value<int>());
+        }
+
+        [Test]
+        public async Task GetStats_OmitsNullFields()
+        {
+            mockPool.Stats = new AdminPoolStats
+            {
+                TotalInstances = 2,
+                AvailableSlots = 8,
+                // Instances and ResourceUsage left null
+            };
+
+            var ctrl = CreateController();
+            var response = await ctrl.HandleRequestAsync("GET", "/api/stats", null);
+
+            Assert.AreEqual(200, response.StatusCode);
+            var json = JObject.Parse(response.Body);
+            Assert.AreEqual(2, json["totalInstances"].Value<int>());
+            Assert.IsNull(json["instances"]);
+            Assert.IsNull(json["resourceUsage"]);
+        }
+
         // =========================================================
         // Routing
         // =========================================================
