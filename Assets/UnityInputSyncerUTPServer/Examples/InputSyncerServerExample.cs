@@ -28,7 +28,7 @@ namespace UnityInputSyncerUTPServer.Examples
 
             server.OnPlayerConnected += player =>
             {
-                Debug.Log($"Player connected: {player.Connection}");
+                Debug.Log($"Player connected: {player.ConnectionId}");
             };
 
             server.OnPlayerJoined += player =>

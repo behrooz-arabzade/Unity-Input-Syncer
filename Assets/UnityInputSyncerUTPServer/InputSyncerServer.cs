@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Linq;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
-using Unity.Networking.Transport;
 using UnityEngine;
 using UnityInputSyncerClient;
 using UnityInputSyncerCore;
@@ -23,24 +22,36 @@ namespace UnityInputSyncerUTPServer
         public event Action OnMatchFinished;
         public event Action<int, StepInputs> OnStepBroadcast;
 
-        private UTPSocketServer Socket;
+        private ISocketServer Socket;
         private InputSyncerServerOptions Options;
         private InputSyncerServerState State;
         private bool Disposed;
 
-        private Dictionary<string, List<Action<NetworkConnection, JToken>>> customJsonCallbacks =
-            new Dictionary<string, List<Action<NetworkConnection, JToken>>>();
+        private Dictionary<string, List<Action<int, JToken>>> customJsonCallbacks =
+            new Dictionary<string, List<Action<int, JToken>>>();
 
         public InputSyncerServer(InputSyncerServerOptions options = null)
+            : this(null, options)
+        {
+        }
+
+        public InputSyncerServer(ISocketServer socket, InputSyncerServerOptions options = null)
         {
             Options = options ?? new InputSyncerServerOptions();
             State = new InputSyncerServerState();
 
-            Socket = new UTPSocketServer(new UTPSocketServerOptions
+            if (socket != null)
             {
-                Port = Options.Port,
-                HeartbeatTimeout = Options.HeartbeatTimeout,
-            });
+                Socket = socket;
+            }
+            else
+            {
+                Socket = new UTPSocketServer(new UTPSocketServerOptions
+                {
+                    Port = Options.Port,
+                    HeartbeatTimeout = Options.HeartbeatTimeout,
+                });
+            }
 
             RegisterSocketEvents();
             RegisterProtocolHandlers();
@@ -125,31 +136,35 @@ namespace UnityInputSyncerUTPServer
             while (State.StepAccumulator >= Options.StepIntervalSeconds)
             {
                 State.StepAccumulator -= Options.StepIntervalSeconds;
-
-                var inputs = new List<object>();
-                int index = 0;
-                foreach (var pendingInput in State.PendingInputs)
-                {
-                    pendingInput["index"] = index++;
-                    inputs.Add(pendingInput);
-                }
-                State.PendingInputs.Clear();
-
-                var stepInputs = new StepInputs
-                {
-                    step = State.CurrentStep,
-                    inputs = inputs
-                };
-
-                State.StepHistory[State.CurrentStep] = stepInputs;
-
-                var stepsArray = new List<StepInputs> { stepInputs };
-                string json = JsonConvert.SerializeObject(stepsArray);
-                SendJsonToAllJoined(InputSyncerEvents.INPUT_SYNCER_STEPS_EVENT, json);
-
-                OnStepBroadcast?.Invoke(State.CurrentStep, stepInputs);
-                State.CurrentStep++;
+                ProcessStep();
             }
+        }
+
+        internal void ProcessStep()
+        {
+            var inputs = new List<object>();
+            int index = 0;
+            foreach (var pendingInput in State.PendingInputs)
+            {
+                pendingInput["index"] = index++;
+                inputs.Add(pendingInput);
+            }
+            State.PendingInputs.Clear();
+
+            var stepInputs = new StepInputs
+            {
+                step = State.CurrentStep,
+                inputs = inputs
+            };
+
+            State.StepHistory[State.CurrentStep] = stepInputs;
+
+            var stepsArray = new List<StepInputs> { stepInputs };
+            string json = JsonConvert.SerializeObject(stepsArray);
+            SendJsonToAllJoined(InputSyncerEvents.INPUT_SYNCER_STEPS_EVENT, json);
+
+            OnStepBroadcast?.Invoke(State.CurrentStep, stepInputs);
+            State.CurrentStep++;
         }
 
         // -------------------------
@@ -165,12 +180,12 @@ namespace UnityInputSyncerUTPServer
         private void RegisterProtocolHandlers()
         {
             // "join" event
-            Socket.On(InputSyncerEvents.MATCH_USER_JOIN_EVENT, (connection, data) =>
+            Socket.On(InputSyncerEvents.MATCH_USER_JOIN_EVENT, (connectionId, data) =>
             {
-                if (!State.Players.ContainsKey(connection))
+                if (!State.Players.ContainsKey(connectionId))
                     return;
 
-                var player = State.Players[connection];
+                var player = State.Players[connectionId];
 
                 if (player.Joined)
                     return;
@@ -182,7 +197,7 @@ namespace UnityInputSyncerUTPServer
                 }
 
                 string userId = data is JObject obj ? obj.Value<string>("userId") : null;
-                player.UserId = userId ?? $"player-{connection.GetHashCode()}";
+                player.UserId = userId ?? $"player-{connectionId}";
                 player.Joined = true;
 
                 OnPlayerJoined?.Invoke(player);
@@ -191,7 +206,7 @@ namespace UnityInputSyncerUTPServer
                 // Send step history to late joiner
                 if (State.MatchStarted && Options.AllowLateJoin && Options.SendStepHistoryOnLateJoin)
                 {
-                    SendAllStepsToPlayer(connection);
+                    SendAllStepsToPlayer(connectionId);
                 }
 
                 // Auto-start if full
@@ -202,12 +217,12 @@ namespace UnityInputSyncerUTPServer
             });
 
             // "input" event
-            Socket.On(InputSyncerEvents.MATCH_USER_INPUT_EVENT, (connection, data) =>
+            Socket.On(InputSyncerEvents.MATCH_USER_INPUT_EVENT, (connectionId, data) =>
             {
-                if (!State.Players.ContainsKey(connection))
+                if (!State.Players.ContainsKey(connectionId))
                     return;
 
-                var player = State.Players[connection];
+                var player = State.Players[connectionId];
 
                 if (!player.Joined || !State.MatchStarted || State.MatchFinished)
                     return;
@@ -234,12 +249,12 @@ namespace UnityInputSyncerUTPServer
             });
 
             // "user-finish" event
-            Socket.On(InputSyncerEvents.MATCH_USER_FINISH_EVENT, (connection, data) =>
+            Socket.On(InputSyncerEvents.MATCH_USER_FINISH_EVENT, (connectionId, data) =>
             {
-                if (!State.Players.ContainsKey(connection))
+                if (!State.Players.ContainsKey(connectionId))
                     return;
 
-                var player = State.Players[connection];
+                var player = State.Players[connectionId];
 
                 if (!player.Joined || player.Finished)
                     return;
@@ -267,52 +282,52 @@ namespace UnityInputSyncerUTPServer
             });
 
             // "request-all-steps" event
-            Socket.On(InputSyncerEvents.MATCH_USER_REQUEST_ALL_STEPS_EVENT, (connection, data) =>
+            Socket.On(InputSyncerEvents.MATCH_USER_REQUEST_ALL_STEPS_EVENT, (connectionId, data) =>
             {
-                if (!State.Players.ContainsKey(connection))
+                if (!State.Players.ContainsKey(connectionId))
                     return;
 
-                SendAllStepsToPlayer(connection);
+                SendAllStepsToPlayer(connectionId);
             });
         }
 
-        private void SendAllStepsToPlayer(NetworkConnection connection)
+        private void SendAllStepsToPlayer(int connectionId)
         {
             var allSteps = new AllStepInputs
             {
-                requestedUser = State.Players.ContainsKey(connection) ? State.Players[connection].UserId : "",
+                requestedUser = State.Players.ContainsKey(connectionId) ? State.Players[connectionId].UserId : "",
                 steps = State.StepHistory.Values.OrderBy(s => s.step).ToList(),
                 lastSentStep = State.CurrentStep > 0 ? State.CurrentStep - 1 : 0
             };
 
             string json = JsonConvert.SerializeObject(allSteps);
-            Socket.SendJson(connection, InputSyncerEvents.INPUT_SYNCER_ALL_STEPS_EVENT, json);
+            Socket.SendJson(connectionId, InputSyncerEvents.INPUT_SYNCER_ALL_STEPS_EVENT, json);
         }
 
-        private void OnClientConnected(NetworkConnection connection)
+        private void OnClientConnected(int connectionId)
         {
             var player = new InputSyncerServerPlayer
             {
-                Connection = connection,
+                ConnectionId = connectionId,
                 Joined = false,
                 Finished = false
             };
 
-            State.Players[connection] = player;
+            State.Players[connectionId] = player;
             OnPlayerConnected?.Invoke(player);
-            Debug.Log($"[InputSyncerServer] Client connected: {connection}");
+            Debug.Log($"[InputSyncerServer] Client connected: {connectionId}");
         }
 
-        private void OnClientDisconnected(NetworkConnection connection)
+        private void OnClientDisconnected(int connectionId)
         {
-            if (!State.Players.ContainsKey(connection))
+            if (!State.Players.ContainsKey(connectionId))
                 return;
 
-            var player = State.Players[connection];
-            State.Players.Remove(connection);
+            var player = State.Players[connectionId];
+            State.Players.Remove(connectionId);
 
             OnPlayerDisconnected?.Invoke(player);
-            Debug.Log($"[InputSyncerServer] Client disconnected: {player.UserId ?? connection.ToString()}");
+            Debug.Log($"[InputSyncerServer] Client disconnected: {player.UserId ?? connectionId.ToString()}");
         }
 
         // -------------------------
@@ -356,11 +371,11 @@ namespace UnityInputSyncerUTPServer
             var player = State.Players.Values.FirstOrDefault(p => p.UserId == userId);
             if (player != null)
             {
-                Socket.SendJson(player.Connection, eventName, json);
+                Socket.SendJson(player.ConnectionId, eventName, json);
             }
         }
 
-        public void On(string eventName, Action<NetworkConnection, JToken> callback)
+        public void On(string eventName, Action<int, JToken> callback)
         {
             Socket.On(eventName, callback);
         }

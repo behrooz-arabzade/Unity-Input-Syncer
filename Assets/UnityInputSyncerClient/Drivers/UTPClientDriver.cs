@@ -12,9 +12,9 @@ namespace UnityInputSyncerClient.Drivers
 {
     public class UTPClientDriver : IClientDriver
     {
-        private UTPSocketClient Socket;
+        private ISocketClient Socket;
 
-        public override bool IsConnected => Socket != null && Socket.State.Connected;
+        public override bool IsConnected => Socket != null && Socket.IsConnected;
 
         private UTPDriverOptions Options;
 

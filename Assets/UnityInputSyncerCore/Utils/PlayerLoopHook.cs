@@ -8,10 +8,11 @@ namespace UnityInputSyncerCore.Utils
     public static class PlayerLoopHook
     {
         static readonly List<Action> callbacks = new();
+        static bool injected;
 
         public static void Register(Action tick)
         {
-            if (callbacks.Count == 0)
+            if (!injected)
                 Inject();
 
             callbacks.Add(tick);
@@ -24,6 +25,8 @@ namespace UnityInputSyncerCore.Utils
 
         static void Inject()
         {
+            injected = true;
+
             var loop = PlayerLoop.GetCurrentPlayerLoop();
 
             Insert(ref loop, typeof(Update), () =>
@@ -43,13 +46,14 @@ namespace UnityInputSyncerCore.Utils
                 {
                     var list = root.subSystemList[i].subSystemList;
                     var newList = new PlayerLoopSystem[list.Length + 1];
-                    list.CopyTo(newList, 0);
 
-                    newList[list.Length] = new PlayerLoopSystem
+                    // Insert at position 0 so the hook ticks before coroutines resume
+                    newList[0] = new PlayerLoopSystem
                     {
                         type = typeof(PlayerLoopHook),
                         updateDelegate = fn
                     };
+                    list.CopyTo(newList, 1);
 
                     root.subSystemList[i].subSystemList = newList;
                     return;

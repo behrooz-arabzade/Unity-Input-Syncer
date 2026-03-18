@@ -1,11 +1,9 @@
-using Unity.Networking.Transport;
-
 namespace UnityInputSyncerUTPServer
 {
     public class InputSyncerServerPlayer
     {
         public string UserId;
-        public NetworkConnection Connection;
+        public int ConnectionId;
         public bool Joined;
         public bool Finished;
     }

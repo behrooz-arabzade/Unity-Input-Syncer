@@ -10,13 +10,15 @@ using UnityInputSyncerCore.Utils;
 
 namespace UnityInputSyncerCore.UTPSocket
 {
-    public sealed class UTPSocketClient : IDisposable
+    public sealed class UTPSocketClient : ISocketClient
     {
         // EVENTS
         public event Action OnConnected;
         public event Action<string> OnDisconnected;
         public event Action OnReconnected;
         public event Action<string> OnError;
+
+        public bool IsConnected => State.Connected;
 
         NetworkDriver driver;
         NetworkConnection connection;

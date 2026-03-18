@@ -1,6 +1,7 @@
 using System;
 using System.Buffers;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text;
 using Newtonsoft.Json.Linq;
 using Unity.Collections;
@@ -10,12 +11,12 @@ using UnityInputSyncerCore.Utils;
 
 namespace UnityInputSyncerCore.UTPSocket
 {
-    public sealed class UTPSocketServer : IDisposable
+    public sealed class UTPSocketServer : ISocketServer
     {
-        // EVENTS
-        public event Action<NetworkConnection> OnClientConnected;
-        public event Action<NetworkConnection> OnClientDisconnected;
-        public event Action<NetworkConnection, string> OnClientError;
+        // EVENTS (ISocketServer uses int connectionId)
+        public event Action<int> OnClientConnected;
+        public event Action<int> OnClientDisconnected;
+        public event Action<int, string> OnClientError;
 
         NetworkDriver driver;
         NetworkPipeline reliable;
@@ -26,6 +27,11 @@ namespace UnityInputSyncerCore.UTPSocket
 
         private Dictionary<NetworkConnection, ClientInfo> clients = new Dictionary<NetworkConnection, ClientInfo>();
         private List<NetworkConnection> pendingRemovals = new List<NetworkConnection>();
+
+        // Connection ID mapping
+        private Dictionary<int, NetworkConnection> idToConnection = new Dictionary<int, NetworkConnection>();
+        private Dictionary<NetworkConnection, int> connectionToId = new Dictionary<NetworkConnection, int>();
+        private int nextConnectionId = 0;
 
         // -------------------------
         // CONSTRUCTOR
@@ -86,6 +92,8 @@ namespace UnityInputSyncerCore.UTPSocket
             }
 
             clients.Clear();
+            idToConnection.Clear();
+            connectionToId.Clear();
             Debug.Log("Server stopped");
         }
 
@@ -110,13 +118,17 @@ namespace UnityInputSyncerCore.UTPSocket
             NetworkConnection connection;
             while ((connection = driver.Accept()) != default)
             {
+                int id = nextConnectionId++;
+                idToConnection[id] = connection;
+                connectionToId[connection] = id;
+
                 clients[connection] = new ClientInfo
                 {
                     Connection = connection,
                     HandshakeComplete = false,
                     HeartbeatTimer = Options.HeartbeatTimeout
                 };
-                Debug.Log($"Client connected: {connection}");
+                Debug.Log($"Client connected: {connection} (id={id})");
             }
         }
 
@@ -141,7 +153,8 @@ namespace UnityInputSyncerCore.UTPSocket
                             break;
 
                         case NetworkEvent.Type.Disconnect:
-                            OnClientDisconnected?.Invoke(connection);
+                            if (connectionToId.TryGetValue(connection, out int disconnId))
+                                OnClientDisconnected?.Invoke(disconnId);
                             pendingRemovals.Add(connection);
                             Debug.Log($"Client disconnected: {connection}");
                             break;
@@ -163,7 +176,8 @@ namespace UnityInputSyncerCore.UTPSocket
                 clientInfo.HeartbeatTimer -= delta;
                 if (clientInfo.HeartbeatTimer <= 0f)
                 {
-                    OnClientError?.Invoke(connection, "Heartbeat timeout");
+                    if (connectionToId.TryGetValue(connection, out int errorId))
+                        OnClientError?.Invoke(errorId, "Heartbeat timeout");
                     if (connection.IsCreated)
                         connection.Disconnect(driver);
                     pendingRemovals.Add(connection);
@@ -175,6 +189,11 @@ namespace UnityInputSyncerCore.UTPSocket
         {
             foreach (var connection in pendingRemovals)
             {
+                if (connectionToId.TryGetValue(connection, out int id))
+                {
+                    idToConnection.Remove(id);
+                    connectionToId.Remove(connection);
+                }
                 clients.Remove(connection);
             }
             pendingRemovals.Clear();
@@ -241,8 +260,8 @@ namespace UnityInputSyncerCore.UTPSocket
 
         private void OnHandshake(NetworkConnection connection, ClientInfo clientInfo, NativeArray<byte> data)
         {
-            // Perform handshake validation here
-            bool success = Options.OnHandshakeValidation?.Invoke(connection, data) ?? true;
+            int id = connectionToId.TryGetValue(connection, out int cid) ? cid : -1;
+            bool success = Options.OnHandshakeValidation?.Invoke(id, data) ?? true;
             string errorMessage = "";
 
             if (!success)
@@ -257,7 +276,7 @@ namespace UnityInputSyncerCore.UTPSocket
             {
                 clientInfo.HandshakeComplete = true;
                 clientInfo.HeartbeatTimer = Options.HeartbeatTimeout;
-                OnClientConnected?.Invoke(connection);
+                OnClientConnected?.Invoke(id);
             }
             else
             {
@@ -270,10 +289,11 @@ namespace UnityInputSyncerCore.UTPSocket
         {
             if (jsonCallbacks.ContainsKey(eventName))
             {
+                int id = connectionToId.TryGetValue(connection, out int cid) ? cid : -1;
                 var jToken = JToken.Parse(json);
                 foreach (var callback in jsonCallbacks[eventName])
                 {
-                    callback(connection, jToken);
+                    callback(id, jToken);
                 }
             }
         }
@@ -282,9 +302,10 @@ namespace UnityInputSyncerCore.UTPSocket
         {
             if (binaryCallbacks.ContainsKey(eventId))
             {
+                int id = connectionToId.TryGetValue(connection, out int cid) ? cid : -1;
                 foreach (var callback in binaryCallbacks[eventId])
                 {
-                    callback(connection, data);
+                    callback(id, data);
                 }
             }
         }
@@ -299,10 +320,13 @@ namespace UnityInputSyncerCore.UTPSocket
         }
 
         // -------------------------
-        // SEND
+        // SEND (ISocketServer - int connectionId)
         // -------------------------
-        public void SendJson(NetworkConnection connection, string eventName, string json, bool reliableSend = true)
+        public void SendJson(int connectionId, string eventName, string json, bool reliable = true)
         {
+            if (!idToConnection.TryGetValue(connectionId, out var connection))
+                return;
+
             if (!clients.ContainsKey(connection) || !clients[connection].HandshakeComplete)
                 return;
 
@@ -323,7 +347,7 @@ namespace UnityInputSyncerCore.UTPSocket
                 NativeArray<byte>.Copy(eventNameBuffer, eventNameBytes, eventNameByteCount);
                 NativeArray<byte>.Copy(jsonBuffer, jsonBytes, jsonByteCount);
 
-                SendInternal(connection, UTPSocketDataType.Json, eventNameBytes, jsonBytes, reliableSend);
+                SendInternal(connection, UTPSocketDataType.Json, eventNameBytes, jsonBytes, reliable);
             }
             finally
             {
@@ -332,8 +356,11 @@ namespace UnityInputSyncerCore.UTPSocket
             }
         }
 
-        public void SendBinary(NetworkConnection connection, int eventId, NativeArray<byte> data, bool reliableSend = false)
+        public void SendBinary(int connectionId, int eventId, NativeArray<byte> data, bool reliable = false)
         {
+            if (!idToConnection.TryGetValue(connectionId, out var connection))
+                return;
+
             if (!clients.ContainsKey(connection) || !clients[connection].HandshakeComplete)
                 return;
 
@@ -343,23 +370,7 @@ namespace UnityInputSyncerCore.UTPSocket
             eventIdBytes[2] = (byte)(eventId >> 16);
             eventIdBytes[3] = (byte)(eventId >> 24);
 
-            SendInternal(connection, UTPSocketDataType.Binary, eventIdBytes, data, reliableSend);
-        }
-
-        public void SendJsonToConnection(NetworkConnection connection, string eventName, string json, bool reliableSend = true)
-        {
-            if (!clients.ContainsKey(connection) || !clients[connection].HandshakeComplete)
-                return;
-
-            SendJson(connection, eventName, json, reliableSend);
-        }
-
-        public void SendBinaryToConnection(NetworkConnection connection, int eventId, NativeArray<byte> data, bool reliableSend = false)
-        {
-            if (!clients.ContainsKey(connection) || !clients[connection].HandshakeComplete)
-                return;
-
-            SendBinary(connection, eventId, data, reliableSend);
+            SendInternal(connection, UTPSocketDataType.Binary, eventIdBytes, data, reliable);
         }
 
         private void SendHandshakeResponse(NetworkConnection connection, bool success, string errorMessage)
@@ -432,45 +443,48 @@ namespace UnityInputSyncerCore.UTPSocket
         }
 
         // -------------------------
-        // EVENT LISTENERS
+        // EVENT LISTENERS (ISocketServer - int connectionId)
         // -------------------------
-        private Dictionary<string, List<Action<NetworkConnection, JToken>>> jsonCallbacks = new Dictionary<string, List<Action<NetworkConnection, JToken>>>();
-        public void On(string eventName, Action<NetworkConnection, JToken> callback)
+        private Dictionary<string, List<Action<int, JToken>>> jsonCallbacks = new Dictionary<string, List<Action<int, JToken>>>();
+        public void On(string eventName, Action<int, JToken> callback)
         {
             if (!jsonCallbacks.ContainsKey(eventName))
             {
-                jsonCallbacks.Add(eventName, new List<Action<NetworkConnection, JToken>>());
+                jsonCallbacks.Add(eventName, new List<Action<int, JToken>>());
             }
 
             jsonCallbacks[eventName].Add(callback);
         }
 
-        private Dictionary<int, List<Action<NetworkConnection, NativeArray<byte>>>> binaryCallbacks = new Dictionary<int, List<Action<NetworkConnection, NativeArray<byte>>>>();
-        public void On(int eventId, Action<NetworkConnection, NativeArray<byte>> callback)
+        private Dictionary<int, List<Action<int, NativeArray<byte>>>> binaryCallbacks = new Dictionary<int, List<Action<int, NativeArray<byte>>>>();
+        public void On(int eventId, Action<int, NativeArray<byte>> callback)
         {
             if (!binaryCallbacks.ContainsKey(eventId))
             {
-                binaryCallbacks.Add(eventId, new List<Action<NetworkConnection, NativeArray<byte>>>());
+                binaryCallbacks.Add(eventId, new List<Action<int, NativeArray<byte>>>());
             }
 
             binaryCallbacks[eventId].Add(callback);
         }
 
         // -------------------------
-        // CLIENT MANAGEMENT
+        // CLIENT MANAGEMENT (ISocketServer - int connectionId)
         // -------------------------
         public int GetConnectedClientCount()
         {
             return clients.Count;
         }
 
-        public IEnumerable<NetworkConnection> GetConnectedClients()
+        public IEnumerable<int> GetConnectedClients()
         {
-            return clients.Keys;
+            return idToConnection.Keys;
         }
 
-        public void DisconnectClient(NetworkConnection connection)
+        public void DisconnectClient(int connectionId)
         {
+            if (!idToConnection.TryGetValue(connectionId, out var connection))
+                return;
+
             if (clients.ContainsKey(connection) && connection.IsCreated)
             {
                 connection.Disconnect(driver);
@@ -498,7 +512,7 @@ namespace UnityInputSyncerCore.UTPSocket
     {
         public ushort Port = 7777;
         public float HeartbeatTimeout = 15f;
-        public Func<NetworkConnection, NativeArray<byte>, bool> OnHandshakeValidation;
+        public Func<int, NativeArray<byte>, bool> OnHandshakeValidation;
     }
 
     public class UTPSocketServerState
