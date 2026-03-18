@@ -1,23 +1,20 @@
 {
-    "name": "PlayModeTests",
+    "name": "TestHelpers",
     "rootNamespace": "",
     "references": [
-        "UnityEngine.TestRunner",
-        "UnityEditor.TestRunner",
         "UnityInputSyncerCore",
         "UnityInputSyncerClient",
         "UnityInputSyncerUTPServer",
         "Unity.Collections",
-        "Unity.Networking.Transport",
-        "TestHelpers"
+        "Unity.Networking.Transport"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],
     "allowUnsafeCode": false,
     "overrideReferences": true,
     "precompiledReferences": [
-        "nunit.framework.dll",
-        "Newtonsoft.Json.dll"
+        "Newtonsoft.Json.dll",
+        "nunit.framework.dll"
     ],
     "autoReferenced": false,
     "defineConstraints": [

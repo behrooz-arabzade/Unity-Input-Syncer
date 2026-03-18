@@ -364,7 +364,10 @@ namespace UnityInputSyncerCore.UTPSocket
 
         private void SendHandshakeResponse(NetworkConnection connection, bool success, string errorMessage)
         {
-            driver.BeginSend(reliable, connection, out var writer);
+            int status = driver.BeginSend(reliable, connection, out var writer);
+            if (status != 0)
+                return;
+
             writer.WriteByte((byte)UTPSocketDataType.Handshake);
             writer.WriteByte((byte)(success ? 1 : 0));
 
@@ -399,7 +402,10 @@ namespace UnityInputSyncerCore.UTPSocket
 
             var pipe = reliableSend ? reliable : unreliable;
 
-            driver.BeginSend(pipe, connection, out var writer);
+            int status = driver.BeginSend(pipe, connection, out var writer);
+            if (status != 0)
+                return;
+
             writer.WriteByte((byte)type);
 
             if (type == UTPSocketDataType.HeartbeatPong)
@@ -419,8 +425,9 @@ namespace UnityInputSyncerCore.UTPSocket
                 writer.WriteInt(eventId);
             }
 
-            writer.WriteInt(payload.Length);
-            writer.WriteBytes(payload);
+            writer.WriteInt(payload.IsCreated ? payload.Length : 0);
+            if (payload.IsCreated && payload.Length > 0)
+                writer.WriteBytes(payload);
             driver.EndSend(writer);
         }
 

@@ -18,6 +18,10 @@ namespace UnityInputSyncerClient.Drivers
 
         private UTPDriverOptions Options;
 
+        // Buffer event registrations made before Socket is created
+        private List<(string eventName, Action<ConnectionResponse> callback)> pendingJsonCallbacks = new();
+        private List<(int eventId, Action<NativeArray<byte>> callback)> pendingBinaryCallbacks = new();
+
         public UTPClientDriver(UTPDriverOptions options = null)
         {
             Options = options ?? new UTPDriverOptions();
@@ -36,6 +40,19 @@ namespace UnityInputSyncerClient.Drivers
             };
 
             Socket = new UTPSocketClient(socketClientOptions);
+
+            // Replay any event registrations that were buffered before Socket was created
+            foreach (var (eventName, callback) in pendingJsonCallbacks)
+            {
+                On(eventName, callback);
+            }
+            pendingJsonCallbacks.Clear();
+
+            foreach (var (eventId, callback) in pendingBinaryCallbacks)
+            {
+                On(eventId, callback);
+            }
+            pendingBinaryCallbacks.Clear();
 
             var connectionTcs = new TaskCompletionSource<bool>();
 
@@ -134,6 +151,12 @@ namespace UnityInputSyncerClient.Drivers
 
         public override void On(string eventName, Action<ConnectionResponse> callback)
         {
+            if (Socket == null)
+            {
+                pendingJsonCallbacks.Add((eventName, callback));
+                return;
+            }
+
             Socket.On(eventName, (json) =>
             {
                 var response = new ConnectionResponse
@@ -146,6 +169,12 @@ namespace UnityInputSyncerClient.Drivers
 
         public override void On(int eventId, Action<NativeArray<byte>> callback)
         {
+            if (Socket == null)
+            {
+                pendingBinaryCallbacks.Add((eventId, callback));
+                return;
+            }
+
             Socket.On(eventId, (bytes) =>
             {
                 callback(bytes);

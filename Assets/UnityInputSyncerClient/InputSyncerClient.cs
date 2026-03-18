@@ -98,7 +98,7 @@ namespace UnityInputSyncerClient
 
         private void OnStepMissed()
         {
-            Driver.Emit(InputSyncerEvents.MATCH_USER_REQUEST_ALL_STEPS_EVENT);
+            Driver?.Emit(InputSyncerEvents.MATCH_USER_REQUEST_ALL_STEPS_EVENT);
         }
 
         private void OnStepsReceived(List<StepInputs> stepsData)
