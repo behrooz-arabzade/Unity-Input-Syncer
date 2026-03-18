@@ -274,5 +274,132 @@ namespace Tests.EditMode
 
             Assert.IsTrue(reconnectedFired, "OnReconnected should be invoked when driver simulates reconnect");
         }
+
+        // ---- Reconnection integration tests ----
+
+        [Test]
+        public void FullReconnection_DriverIntegration_ResyncLifecycle()
+        {
+            // Steps 0-2 arrive normally
+            driver.TriggerEvent(InputSyncerEvents.INPUT_SYNCER_STEPS_EVENT, new List<StepInputs>
+            {
+                new StepInputs { step = 0, inputs = new List<object> { "a" } },
+                new StepInputs { step = 1, inputs = new List<object> { "b" } },
+                new StepInputs { step = 2, inputs = new List<object> { "c" } },
+            });
+
+            var state = client.GetState();
+            Assert.AreEqual(2, state.LastReceivedStep);
+
+            driver.EmittedEvents.Clear();
+
+            // Gap: step 4 arrives (skipping 3) → should emit request-all-steps
+            driver.TriggerEvent(InputSyncerEvents.INPUT_SYNCER_STEPS_EVENT, new List<StepInputs>
+            {
+                new StepInputs { step = 4, inputs = new List<object> { "e" } }
+            });
+
+            Assert.AreEqual(1, driver.EmittedEvents.Count);
+            Assert.AreEqual(InputSyncerEvents.MATCH_USER_REQUEST_ALL_STEPS_EVENT, driver.EmittedEvents[0].EventName);
+
+            // Server responds with full history (steps 0-3)
+            driver.TriggerEvent(InputSyncerEvents.INPUT_SYNCER_ALL_STEPS_EVENT, new AllStepInputs
+            {
+                requestedUser = "player-1",
+                steps = new List<StepInputs>
+                {
+                    new StepInputs { step = 0, inputs = new List<object> { "a" } },
+                    new StepInputs { step = 1, inputs = new List<object> { "b" } },
+                    new StepInputs { step = 2, inputs = new List<object> { "c" } },
+                    new StepInputs { step = 3, inputs = new List<object> { "d" } },
+                },
+                lastSentStep = 3
+            });
+
+            // Temp step 4 should have been merged
+            Assert.AreEqual(4, state.LastReceivedStep);
+            Assert.IsTrue(state.HasStep(4));
+
+            // Step 5 arrives normally after resync
+            driver.TriggerEvent(InputSyncerEvents.INPUT_SYNCER_STEPS_EVENT, new List<StepInputs>
+            {
+                new StepInputs { step = 5, inputs = new List<object> { "f" } }
+            });
+
+            Assert.AreEqual(5, state.LastReceivedStep);
+            for (int i = 0; i <= 5; i++)
+                Assert.IsTrue(state.HasStep(i), $"State should have step {i}");
+        }
+
+        [Test]
+        public void OnReconnected_DriverEvent_DoesNotDisruptState()
+        {
+            // Steps 0-1 arrive normally
+            driver.TriggerEvent(InputSyncerEvents.INPUT_SYNCER_STEPS_EVENT, new List<StepInputs>
+            {
+                new StepInputs { step = 0, inputs = new List<object> { "a" } },
+                new StepInputs { step = 1, inputs = new List<object> { "b" } },
+            });
+
+            var state = client.GetState();
+            Assert.AreEqual(1, state.LastReceivedStep);
+
+            // Transport-level reconnect fires
+            driver.SimulateReconnect();
+
+            // Step 2 arrives after reconnect — should continue normally
+            driver.TriggerEvent(InputSyncerEvents.INPUT_SYNCER_STEPS_EVENT, new List<StepInputs>
+            {
+                new StepInputs { step = 2, inputs = new List<object> { "c" } }
+            });
+
+            Assert.AreEqual(2, state.LastReceivedStep);
+            Assert.IsTrue(state.HasStep(0));
+            Assert.IsTrue(state.HasStep(1));
+            Assert.IsTrue(state.HasStep(2));
+        }
+
+        // ---- Mock mode edge case tests ----
+
+        [Test]
+        public void MockClient_SendInput_BeforeConnect_Queues()
+        {
+            var mockClient = new InputSyncerClient(null, new InputSyncerClientOptions { Mock = true });
+
+            // SendInput before ConnectAsync should queue without throwing
+            var input = new TestInput(new TestInputData { action = "jump", value = 1 });
+            bool result = mockClient.SendInput(input);
+
+            Assert.IsTrue(result, "SendInput in mock mode should return true even before connect");
+
+            mockClient.Dispose();
+        }
+
+        [Test]
+        public void MockClient_JoinMatch_WithExplicitUserId_SetsUserId()
+        {
+            var mockDriver = new TestClientDriver();
+            var mockClient = new InputSyncerClient(mockDriver, new InputSyncerClientOptions { Mock = true });
+
+            // JoinMatch with explicit userId in mock mode should not throw
+            Assert.DoesNotThrow(() => mockClient.JoinMatch("explicit-id"));
+
+            // In mock mode, Driver is null (set by constructor) so no emit happens
+            Assert.AreEqual(0, mockDriver.EmittedEvents.Count);
+
+            mockClient.Dispose();
+        }
+
+        [Test]
+        public void SendInput_WhenDriverNull_ReturnsFalse()
+        {
+            // Set driver to null on a non-mock client
+            client.Driver = null;
+
+            var input = new TestInput(new TestInputData { action = "move", value = 1 });
+            bool result = client.SendInput(input);
+
+            Assert.IsFalse(result, "SendInput should return false when Driver is null");
+        }
     }
 }

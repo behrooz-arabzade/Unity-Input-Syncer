@@ -339,6 +339,196 @@ namespace Tests.EditMode
             Assert.AreEqual("b", ((InputWithIndex)result[1]).value);
             Assert.AreEqual("c", ((InputWithIndex)result[2]).value);
         }
+
+        // ---- Reconnection flow tests ----
+
+        [Test]
+        public void FullReconnectionLifecycle_StepsResumeNormally()
+        {
+            var state = new InputSyncerState();
+            int stepMissedCount = 0;
+            state.OnStepMissed = () => stepMissedCount++;
+
+            // Steps 0-2 arrive normally
+            state.AddStepInputs(new List<StepInputs>
+            {
+                new StepInputs { step = 0, inputs = new List<object> { "a" } },
+                new StepInputs { step = 1, inputs = new List<object> { "b" } },
+                new StepInputs { step = 2, inputs = new List<object> { "c" } },
+            });
+            Assert.AreEqual(2, state.LastReceivedStep);
+
+            // Gap: skip step 3, receive step 4 → triggers resync
+            state.AddStepInputs(new List<StepInputs>
+            {
+                new StepInputs { step = 4, inputs = new List<object> { "e-temp" } }
+            });
+            Assert.AreEqual(1, stepMissedCount);
+            Assert.IsFalse(state.HasStep(4)); // buffered in temp
+
+            // Resync arrives with steps 0-3, serverLastSentStep=3
+            // Temp step 4 should merge automatically
+            state.AddAllStepInputs(new List<StepInputs>
+            {
+                new StepInputs { step = 0, inputs = new List<object> { "a" } },
+                new StepInputs { step = 1, inputs = new List<object> { "b" } },
+                new StepInputs { step = 2, inputs = new List<object> { "c" } },
+                new StepInputs { step = 3, inputs = new List<object> { "d" } },
+            }, 3);
+
+            Assert.AreEqual(4, state.LastReceivedStep);
+            Assert.IsTrue(state.HasStep(4));
+
+            // Step 5 arrives normally after resync
+            state.AddStepInputs(new List<StepInputs>
+            {
+                new StepInputs { step = 5, inputs = new List<object> { "f" } }
+            });
+
+            Assert.AreEqual(5, state.LastReceivedStep);
+            Assert.IsTrue(state.HasStep(5));
+            Assert.AreEqual(1, stepMissedCount, "OnStepMissed should have fired exactly once");
+        }
+
+        [Test]
+        public void AddAllStepInputs_WithEmptyHistory_SetsStateCorrectly()
+        {
+            var state = new InputSyncerState();
+
+            // Server has sent step 0 but with no inputs (empty history)
+            state.AddAllStepInputs(new List<StepInputs>(), 0);
+
+            Assert.AreEqual(0, state.LastReceivedStep);
+            Assert.IsTrue(state.HasStep(0));
+
+            var inputs = state.GetInputsForStep(0);
+            Assert.IsNotNull(inputs);
+            Assert.AreEqual(0, inputs.Count);
+        }
+
+        [Test]
+        public void AddAllStepInputs_DuplicateStepInTempAndHistory_HistoryWins()
+        {
+            var state = new InputSyncerState();
+            state.OnStepMissed = () => { };
+
+            // Step 0 arrives normally
+            state.AddStepInputs(new List<StepInputs>
+            {
+                new StepInputs { step = 0, inputs = new List<object>() }
+            });
+
+            // Gap: skip step 1, step 2 goes to temp with "temp" data
+            state.AddStepInputs(new List<StepInputs>
+            {
+                new StepInputs { step = 2, inputs = new List<object> { "temp-data" } }
+            });
+
+            // Resync includes step 2 with "server" data, serverLastSentStep=2
+            // Server history should win for step 2 (temp step 2 is skipped because key <= LastReceivedStep)
+            state.AddAllStepInputs(new List<StepInputs>
+            {
+                new StepInputs { step = 0, inputs = new List<object> { "s0" } },
+                new StepInputs { step = 1, inputs = new List<object> { "s1" } },
+                new StepInputs { step = 2, inputs = new List<object> { "server-data" } },
+            }, 2);
+
+            Assert.AreEqual(2, state.LastReceivedStep);
+            var inputs2 = state.GetInputsForStep(2);
+            Assert.AreEqual(1, inputs2.Count);
+            Assert.AreEqual("server-data", inputs2[0], "Server history should override temp step data");
+        }
+
+        [Test]
+        public void MultipleSequentialReconnections_AllResolve()
+        {
+            var state = new InputSyncerState();
+            int stepMissedCount = 0;
+            state.OnStepMissed = () => stepMissedCount++;
+
+            // Step 0 arrives normally
+            state.AddStepInputs(new List<StepInputs>
+            {
+                new StepInputs { step = 0, inputs = new List<object>() }
+            });
+
+            // First gap: skip step 1, step 2 goes to temp
+            state.AddStepInputs(new List<StepInputs>
+            {
+                new StepInputs { step = 2, inputs = new List<object> { "first-temp" } }
+            });
+            Assert.AreEqual(1, stepMissedCount);
+
+            // First resync: steps 0-1, serverLastSentStep=1 → merges temp step 2
+            state.AddAllStepInputs(new List<StepInputs>
+            {
+                new StepInputs { step = 0, inputs = new List<object>() },
+                new StepInputs { step = 1, inputs = new List<object>() },
+            }, 1);
+
+            Assert.AreEqual(2, state.LastReceivedStep);
+            Assert.IsTrue(state.HasStep(2));
+
+            // Second gap: skip step 3, step 4 goes to temp
+            state.AddStepInputs(new List<StepInputs>
+            {
+                new StepInputs { step = 4, inputs = new List<object> { "second-temp" } }
+            });
+            Assert.AreEqual(2, stepMissedCount);
+
+            // Second resync: steps 0-3, serverLastSentStep=3 → merges temp step 4
+            state.AddAllStepInputs(new List<StepInputs>
+            {
+                new StepInputs { step = 0, inputs = new List<object>() },
+                new StepInputs { step = 1, inputs = new List<object>() },
+                new StepInputs { step = 2, inputs = new List<object>() },
+                new StepInputs { step = 3, inputs = new List<object>() },
+            }, 3);
+
+            Assert.AreEqual(4, state.LastReceivedStep);
+            Assert.IsTrue(state.HasStep(4));
+            Assert.AreEqual(2, stepMissedCount, "OnStepMissed should have fired exactly twice");
+        }
+
+        [Test]
+        public void AddAllStepInputs_AfterResync_NormalStepsResumeWithoutBuffering()
+        {
+            var state = new InputSyncerState();
+            state.OnStepMissed = () => { };
+
+            // Step 0 arrives normally
+            state.AddStepInputs(new List<StepInputs>
+            {
+                new StepInputs { step = 0, inputs = new List<object>() }
+            });
+
+            // Gap: skip step 1, step 2 goes to temp
+            state.AddStepInputs(new List<StepInputs>
+            {
+                new StepInputs { step = 2, inputs = new List<object>() }
+            });
+
+            // Resync: steps 0-1, serverLastSentStep=1 → merges temp step 2
+            state.AddAllStepInputs(new List<StepInputs>
+            {
+                new StepInputs { step = 0, inputs = new List<object>() },
+                new StepInputs { step = 1, inputs = new List<object>() },
+            }, 1);
+
+            Assert.AreEqual(2, state.LastReceivedStep);
+
+            // Step 3 arrives normally — should go directly to ReceivedSteps, not temp
+            state.AddStepInputs(new List<StepInputs>
+            {
+                new StepInputs { step = 3, inputs = new List<object> { "normal" } }
+            });
+
+            Assert.AreEqual(3, state.LastReceivedStep);
+            Assert.IsTrue(state.HasStep(3), "Step 3 should be in ReceivedSteps, not buffered");
+            var inputs = state.GetInputsForStep(3);
+            Assert.AreEqual(1, inputs.Count);
+            Assert.AreEqual("normal", inputs[0]);
+        }
     }
 
     public class InputWithIndex

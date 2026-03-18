@@ -286,5 +286,65 @@ namespace Tests.EditMode
                 ClearBootstrapEnvVars();
             }
         }
+
+        [Test]
+        public void ApplyEnvironmentOverrides_NoEnvVarsSet_PreservesAllDefaults()
+        {
+            ClearBootstrapEnvVars();
+            try
+            {
+                var go = new GameObject();
+                var bootstrap = go.AddComponent<DedicatedServerBootstrap>();
+                bootstrap.ApplyEnvironmentOverrides();
+
+                Assert.AreEqual((ushort)7777, bootstrap.ConfigPort);
+                Assert.AreEqual(2, bootstrap.ConfigMaxPlayers);
+                Assert.IsTrue(bootstrap.ConfigAutoStartWhenFull);
+                Assert.AreEqual(0.1f, bootstrap.ConfigStepIntervalSeconds, 0.001f);
+                Assert.IsFalse(bootstrap.ConfigAllowLateJoin);
+                Assert.IsTrue(bootstrap.ConfigSendStepHistoryOnLateJoin);
+                Assert.AreEqual(15f, bootstrap.ConfigHeartbeatTimeout, 0.001f);
+
+                UnityEngine.Object.DestroyImmediate(go);
+            }
+            finally
+            {
+                ClearBootstrapEnvVars();
+            }
+        }
+
+        [Test]
+        public void ApplyEnvironmentOverrides_AllSevenEnvVarsSet_OverridesEverything()
+        {
+            ClearBootstrapEnvVars();
+            try
+            {
+                Environment.SetEnvironmentVariable("INPUT_SYNCER_PORT", "9999");
+                Environment.SetEnvironmentVariable("INPUT_SYNCER_MAX_PLAYERS", "8");
+                Environment.SetEnvironmentVariable("INPUT_SYNCER_AUTO_START_WHEN_FULL", "false");
+                Environment.SetEnvironmentVariable("INPUT_SYNCER_STEP_INTERVAL", "0.25");
+                Environment.SetEnvironmentVariable("INPUT_SYNCER_ALLOW_LATE_JOIN", "true");
+                Environment.SetEnvironmentVariable("INPUT_SYNCER_SEND_HISTORY_ON_LATE_JOIN", "false");
+                Environment.SetEnvironmentVariable("INPUT_SYNCER_HEARTBEAT_TIMEOUT", "60");
+
+                var go = new GameObject();
+                var bootstrap = go.AddComponent<DedicatedServerBootstrap>();
+                bootstrap.ApplyEnvironmentOverrides();
+
+                Assert.AreEqual((ushort)9999, bootstrap.ConfigPort);
+                Assert.AreEqual(8, bootstrap.ConfigMaxPlayers);
+                Assert.IsFalse(bootstrap.ConfigAutoStartWhenFull);
+                Assert.AreEqual(0.25f, bootstrap.ConfigStepIntervalSeconds, 0.001f);
+                Assert.IsTrue(bootstrap.ConfigAllowLateJoin);
+                Assert.IsFalse(bootstrap.ConfigSendStepHistoryOnLateJoin);
+                Assert.AreEqual(60f, bootstrap.ConfigHeartbeatTimeout, 0.001f);
+
+                UnityEngine.Object.DestroyImmediate(go);
+            }
+            finally
+            {
+                ClearBootstrapEnvVars();
+            }
+        }
     }
 }

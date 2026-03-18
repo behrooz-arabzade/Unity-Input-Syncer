@@ -282,5 +282,86 @@ namespace Tests.PlayMode
 
             client.Dispose();
         }
+
+        [UnityTest]
+        public IEnumerator MockClient_MultipleRapidInputs_AllAppearInSameStep()
+        {
+            _ = UnityThreadDispatcher.Instance;
+
+            var options = new InputSyncerClientOptions
+            {
+                Mock = true,
+                StepIntervalMs = 500,
+                MockCurrentUserId = "test-user"
+            };
+            var client = new InputSyncerClient(null, options);
+
+            // Queue 5 inputs before connecting — all should land in step 0
+            for (int i = 0; i < 5; i++)
+            {
+                client.SendInput(new TestInput(new TestInputData { action = $"action-{i}", value = i }));
+            }
+
+            var task = client.ConnectAsync();
+            yield return new WaitUntil(() => task.IsCompleted);
+
+            var state = client.GetState();
+
+            float elapsed = 0f;
+            while (!state.HasStep(0) && elapsed < 3f)
+            {
+                yield return null;
+                elapsed += Time.unscaledDeltaTime;
+            }
+
+            Assert.IsTrue(state.HasStep(0));
+            var inputs = state.GetInputsForStep(0);
+            Assert.IsNotNull(inputs);
+            Assert.AreEqual(5, inputs.Count, "All 5 inputs should appear in step 0");
+
+            for (int i = 0; i < 5; i++)
+            {
+                var input = inputs[i] as BaseInputData;
+                Assert.IsNotNull(input);
+                Assert.AreEqual(i, input.index, $"Input at position {i} should have index {i}");
+            }
+
+            client.Dispose();
+        }
+
+        [UnityTest]
+        public IEnumerator MockClient_StateAccessible_AfterDispose()
+        {
+            _ = UnityThreadDispatcher.Instance;
+
+            var options = new InputSyncerClientOptions
+            {
+                Mock = true,
+                StepIntervalMs = 50
+            };
+            var client = new InputSyncerClient(null, options);
+
+            var task = client.ConnectAsync();
+            yield return new WaitUntil(() => task.IsCompleted);
+
+            var state = client.GetState();
+
+            // Wait for step 0
+            float elapsed = 0f;
+            while (!state.HasStep(0) && elapsed < 3f)
+            {
+                yield return null;
+                elapsed += Time.unscaledDeltaTime;
+            }
+
+            Assert.IsTrue(state.HasStep(0));
+
+            // Dispose stops the tick loop
+            client.Dispose();
+
+            // State should still be accessible after disposal — critical for post-match reads
+            Assert.IsTrue(client.GetState().HasStep(0), "State should survive disposal");
+            Assert.IsNotNull(client.GetState().GetInputsForStep(0), "Step data should survive disposal");
+        }
     }
 }
