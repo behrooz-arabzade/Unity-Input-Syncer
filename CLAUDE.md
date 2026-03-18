@@ -95,3 +95,14 @@ Or via **Window > General > Test Runner** in the Unity Editor.
 - The wire protocol for UTP is a custom binary format: `[1-byte type][variable header][length-prefixed payload]`. JSON events encode event name + JSON body; binary events encode int event ID + raw bytes.
 - Mock mode (`InputSyncerClientOptions.Mock = true`) runs a local tick loop for development without a server.
 
+## Remaining Steps
+
+Tracked steps to complete the project. Update this list as requirements are added or completed.
+
+- [ ] **Step 1: Create a Ready-Made Dedicated Server Scene** — No pre-configured server scene exists in `Assets/Scenes/`. Only `InputSyncerServerExample.cs` exists as example code. Need a Unity scene with server components pre-wired, ready to build as a dedicated server. *(Requirement #6)*
+- [ ] **Step 2: Add Environment Variable Configuration for the Server** — `InputSyncerServerOptions` has hardcoded defaults only. Need env var parsing (e.g., `PORT`, `MAX_PLAYERS`, `STEP_INTERVAL`, `AUTO_START_WHEN_FULL`) so the dedicated server build can be configured without recompilation. *(Requirement #6)*
+- [ ] **Step 3: Implement Binary Data Deserialization on the Client** — `UTPClientDriver.GetData<T>(NativeArray<byte>)` throws `NotImplementedException`. Binary events can be sent but not received/deserialized. Need to implement `INativeArraySerializable` deserialization path. *(Requirement #8)*
+- [ ] **Step 4: Implement Socket.IO Binary Event Support (or document limitation)** — `SocketIODriver.EmitBinary()` and `OnBinary()` both throw `NotImplementedException`. Either implement or explicitly document as unsupported with a clearer error message. *(Requirement #8)*
+- [ ] **Step 5: Add Server-Side Simulation Example** — The architecture supports server-side simulation but no example scene, script, or documentation demonstrates how to set it up. *(Requirement #7)*
+- [ ] **Step 6: Fill Test Gaps** — Add tests for: binary deserialization (once implemented), env var config, mock mode edge cases, reconnection flows.
+
