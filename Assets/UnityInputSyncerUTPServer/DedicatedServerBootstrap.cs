@@ -111,6 +111,15 @@ namespace UnityInputSyncerUTPServer
             return float.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out value);
         }
 
+        internal static bool TryGetEnvString(string name, out string value)
+        {
+            value = null;
+            var raw = Environment.GetEnvironmentVariable(name);
+            if (string.IsNullOrEmpty(raw)) return false;
+            value = raw;
+            return true;
+        }
+
         internal static bool TryGetEnvBool(string name, out bool value)
         {
             value = false;

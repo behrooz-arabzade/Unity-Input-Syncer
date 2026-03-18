@@ -113,6 +113,8 @@ A ready-made server scene is at `Assets/Scenes/DedicatedServerScene.unity`. It c
 | `INPUT_SYNCER_ALLOW_LATE_JOIN`           | bool   | false   | Allow joining after match start           |
 | `INPUT_SYNCER_SEND_HISTORY_ON_LATE_JOIN` | bool   | true    | Send step history to late joiners         |
 | `INPUT_SYNCER_HEARTBEAT_TIMEOUT`         | float  | 15      | Seconds before disconnecting idle clients |
+| `INPUT_SYNCER_ADMIN_PORT`                | ushort | 8080    | Admin HTTP listen port                    |
+| `INPUT_SYNCER_ADMIN_AUTH_TOKEN`          | string | ""      | Bearer token (empty = no auth)            |
 
 Bool values accept `true`/`false` or `1`/`0`. The `Server` property on `DedicatedServerBootstrap` is public for server-side simulation access.
 
@@ -134,6 +136,6 @@ Tracked steps to complete the project. Update this list as requirements are adde
 - [x] **Step 5: Add Server-Side Simulation Example** — `ServerSimulationExample` (server-side) and `ServerSimulationClientExample` (client-side) demonstrate authoritative server simulation with shared `MoveInput`/`SimulationGameState` data contracts. _(Requirement #7)_
 - [x] **Step 6: Fill Test Gaps** — Added 17 tests: reconnection flows (5 state + 2 integration), mock mode edge cases (3 edit + 2 play), binary deserialization (3), env var config (2).
 - [x] **Step 7: Multi-Instance Server Pool** — Create a server instance pool that manages multiple `InputSyncerServer` instances, each on a different port. The pool should handle instance lifecycle (create, destroy, recycle) and track instance state (idle, in-match, full). _(Requirement #9)_
-- [ ] **Step 8: Admin HTTP Controller with Auth** — Implement an HTTP server (embedded in the dedicated server build) with token-based authentication. Expose endpoints for admins to request a new match instance (allocates from pool), stop/release instances, and list active instances. _(Requirement #10)_
+- [x] **Step 8: Admin HTTP Controller with Auth** — Embedded HTTP server with token-based auth (`AdminHttpServer` + `AdminController`). Endpoints: POST/GET/DELETE `/api/instances`, GET `/api/stats`. Auth via `Authorization: Bearer <token>` header. `AdminPoolOperations` bridges HTTP thread to main thread via `UnityThreadDispatcher`. _(Requirement #10)_
 - [ ] **Step 9: Monitoring Endpoint** — Add an HTTP route to the admin controller that returns server statistics: number of active/idle/total instances, per-instance player counts, and resource usage (memory, CPU if available). _(Requirement #11)_
 - [ ] **Step 10: Multi-Instance Dedicated Server Scene** — Create a new scene (e.g., `MultiInstanceServerScene.unity`) with a bootstrap component that initializes the instance pool and starts the admin HTTP controller. Configurable via environment variables (base port, max instances, admin port, auth token, etc.). _(Requirements #9, #10, #11)_
