@@ -20,6 +20,9 @@ Unity Input Syncer is a Unity 6 (6000.3.0f1) library for deterministic multiplay
 8. **Channel support per transport**:
   - **Socket.IO** — TCP only, reliable channel only.
   - **UTP** — Supports both reliable and unreliable channels (unreliable for lower-latency use cases).
+9. **Multi-instance dedicated server** — A dedicated server scene that hosts multiple server (match) instances on different ports, using a pool pattern to manage instance lifecycle.
+10. **Admin HTTP controller** — An HTTP server with authentication that allows admins to request new match instances and manage the server pool.
+11. **Server monitoring** — A monitoring HTTP endpoint exposing the number of active server instances and resource usage statistics.
 
 ## Architecture
 
@@ -125,4 +128,8 @@ Tracked steps to complete the project. Update this list as requirements are adde
 - [ ] **Step 4: Implement Socket.IO Binary Event Support (or document limitation)** — `SocketIODriver.EmitBinary()` and `OnBinary()` both throw `NotImplementedException`. Either implement or explicitly document as unsupported with a clearer error message. *(Requirement #8)*
 - [ ] **Step 5: Add Server-Side Simulation Example** — The architecture supports server-side simulation but no example scene, script, or documentation demonstrates how to set it up. *(Requirement #7)*
 - [ ] **Step 6: Fill Test Gaps** — Add tests for: binary deserialization (once implemented), env var config, mock mode edge cases, reconnection flows.
+- [ ] **Step 7: Multi-Instance Server Pool** — Create a server instance pool that manages multiple `InputSyncerServer` instances, each on a different port. The pool should handle instance lifecycle (create, destroy, recycle) and track instance state (idle, in-match, full). *(Requirement #9)*
+- [ ] **Step 8: Admin HTTP Controller with Auth** — Implement an HTTP server (embedded in the dedicated server build) with token-based authentication. Expose endpoints for admins to request a new match instance (allocates from pool), stop/release instances, and list active instances. *(Requirement #10)*
+- [ ] **Step 9: Monitoring Endpoint** — Add an HTTP route to the admin controller that returns server statistics: number of active/idle/total instances, per-instance player counts, and resource usage (memory, CPU if available). *(Requirement #11)*
+- [ ] **Step 10: Multi-Instance Dedicated Server Scene** — Create a new scene (e.g., `MultiInstanceServerScene.unity`) with a bootstrap component that initializes the instance pool and starts the admin HTTP controller. Configurable via environment variables (base port, max instances, admin port, auth token, etc.). *(Requirements #9, #10, #11)*
 
