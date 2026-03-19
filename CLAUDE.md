@@ -115,7 +115,7 @@ A ready-made server scene is at `Assets/Scenes/DedicatedServerScene.unity`. It c
 | `INPUT_SYNCER_HEARTBEAT_TIMEOUT`         | float  | 15      | Seconds before disconnecting idle clients |
 | `INPUT_SYNCER_ADMIN_PORT`                | ushort | 8080    | Admin HTTP listen port                    |
 | `INPUT_SYNCER_ADMIN_AUTH_TOKEN`          | string | ""      | Bearer token (empty = no auth)            |
-| `INPUT_SYNCER_IDLE_TIMEOUT`             | float  | 0       | Seconds before destroying idle instances  |
+| `INPUT_SYNCER_IDLE_TIMEOUT`              | float  | 0       | Seconds before destroying idle instances  |
 
 Bool values accept `true`/`false` or `1`/`0`. The `Server` property on `DedicatedServerBootstrap` is public for server-side simulation access.
 
@@ -147,3 +147,8 @@ Bool values accept `true`/`false` or `1`/`0`. The `Server` property on `Dedicate
 
 - [ ] **Remove Unused `SampleScene.unity`** — Leftover from the Unity project template, serves no purpose. **Files:** `Assets/Scenes/SampleScene.unity`.
 - [ ] **Expose Latency Support Flag on Driver** — `LatencyMs` returns -1 for Socket.IO clients since it's only implemented for UTP. Consumers have no way to check at runtime whether latency measurement is supported without checking the driver type. Add a `bool SupportsLatency` property to `IClientDriver`. **Files:** `IClientDriver.cs`, `UTPClientDriver.cs`, `SocketIODriver.cs`, `InputSyncerClient.cs`.
+
+### Future Features
+
+- [ ] **JWT-Authenticated Instance Creation** — When an admin creates an instance via the Admin HTTP API, they provide a list of user IDs and optional match data in the request body. The server creates the instance, stores the user/match data, generates a JWT token per user, and returns the tokens in the response. Clients must present their JWT token when connecting to the instance for authentication. This replaces the current open-connection model with a secure, invitation-based flow. **Files:** `AdminController.cs`, `AdminHttpServer.cs`, `InputSyncerServer.cs`, `InputSyncerServerOptions.cs`, `ServerInstance.cs`, `UTPSocketServer.cs`.
+- [ ] **Spectator Mode** — Allow spectator clients to connect to a match instance and receive step broadcasts (inputs) without being able to send gameplay inputs. Spectators are not counted toward `MaxPlayers`. Optionally, spectators can send non-gameplay inputs (e.g., cheers, reactions) on a separate channel that gets broadcast but doesn't affect simulation. Add configurable `MaxSpectators` (0 = disabled) to server options with a corresponding `INPUT_SYNCER_MAX_SPECTATORS` env var. Spectators connect with a distinct role flag and receive a filtered event stream. **Files:** `InputSyncerServer.cs`, `InputSyncerServerOptions.cs`, `DedicatedServerBootstrap.cs`, `InputSyncerClient.cs`, `InputSyncerClientOptions.cs`, `IClientDriver.cs`.
