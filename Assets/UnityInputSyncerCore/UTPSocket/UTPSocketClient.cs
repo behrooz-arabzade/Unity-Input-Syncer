@@ -109,7 +109,7 @@ namespace UnityInputSyncerCore.UTPSocket
 
         void HandleHeartbeat(float delta)
         {
-            if (!connection.IsCreated || State.Reconnecting)
+            if (!connection.IsCreated || !State.Connected || State.Reconnecting)
                 return;
 
             // Send ping
