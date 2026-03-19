@@ -9,6 +9,7 @@ namespace UnityInputSyncerUTPServer
         public ServerInstanceState State { get; private set; }
         public InputSyncerServer Server { get; }
         public DateTime CreatedAt { get; }
+        public DateTime LastStateChangeTime { get; private set; }
 
         public event Action<ServerInstance, ServerInstanceState, ServerInstanceState> OnStateChanged;
 
@@ -19,6 +20,7 @@ namespace UnityInputSyncerUTPServer
             Server = server;
             State = ServerInstanceState.Idle;
             CreatedAt = DateTime.UtcNow;
+            LastStateChangeTime = DateTime.UtcNow;
 
             Server.OnPlayerConnected += HandlePlayerConnected;
             Server.OnPlayerDisconnected += HandlePlayerDisconnected;
@@ -33,6 +35,7 @@ namespace UnityInputSyncerUTPServer
 
             var oldState = State;
             State = newState;
+            LastStateChangeTime = DateTime.UtcNow;
             OnStateChanged?.Invoke(this, oldState, newState);
         }
 

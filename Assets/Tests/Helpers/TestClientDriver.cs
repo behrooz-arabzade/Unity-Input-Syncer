@@ -18,6 +18,8 @@ namespace UnityInputSyncerClient.Tests
     {
         private bool _isConnected;
         public override bool IsConnected => _isConnected;
+        public override float LatencyMs => TestLatencyMs;
+        public float TestLatencyMs = -1f;
 
         public void SetConnected(bool connected) => _isConnected = connected;
 

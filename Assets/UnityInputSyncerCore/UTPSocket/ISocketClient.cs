@@ -11,6 +11,7 @@ namespace UnityInputSyncerCore.UTPSocket
         event Action OnReconnected;
         event Action<string> OnError;
         bool IsConnected { get; }
+        float LatencyMs { get; }
         void Connect();
         void SendJson(string eventName, string json, bool reliable = true);
         void SendBinary(int eventId, NativeArray<byte> data, bool reliable = false);

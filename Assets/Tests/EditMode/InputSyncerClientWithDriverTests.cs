@@ -514,5 +514,35 @@ namespace Tests.EditMode
                 driver.OnReconnected?.Invoke();
             });
         }
+
+        // ---- Latency / Ping Measurement tests (Step 20) ----
+
+        [Test]
+        public void LatencyMs_DefaultIsNegativeOne()
+        {
+            Assert.AreEqual(-1f, client.LatencyMs);
+        }
+
+        [Test]
+        public void LatencyMs_PropagatesFromDriver()
+        {
+            driver.TestLatencyMs = 42.5f;
+            Assert.AreEqual(42.5f, client.LatencyMs);
+        }
+
+        [Test]
+        public void LatencyMs_NullDriver_ReturnsNegativeOne()
+        {
+            client.Driver = null;
+            Assert.AreEqual(-1f, client.LatencyMs);
+        }
+
+        [Test]
+        public void LatencyMs_MockMode_ReturnsNegativeOne()
+        {
+            var mockClient = new InputSyncerClient(null, new InputSyncerClientOptions { Mock = true });
+            Assert.AreEqual(-1f, mockClient.LatencyMs);
+            mockClient.Dispose();
+        }
     }
 }

@@ -174,5 +174,16 @@ namespace Tests.EditMode
             Assert.AreEqual(result1.ByteValue, result2.ByteValue);
             bytes.Dispose();
         }
+
+        [Test]
+        public void LatencyMs_BeforeConnect_ReturnsNegativeOne()
+        {
+            var driver = new UTPClientDriver(new UTPDriverOptions
+            {
+                Ip = "127.0.0.1",
+                Port = 9999
+            });
+            Assert.AreEqual(-1f, driver.LatencyMs);
+        }
     }
 }

@@ -14,6 +14,7 @@ namespace UnityInputSyncerClient.Drivers
     {
         private SocketIOUnity Socket;
         public override bool IsConnected => Socket?.Connected ?? false;
+        public override float LatencyMs => -1f;
 
         private SocketIODriverOptions Options;
 

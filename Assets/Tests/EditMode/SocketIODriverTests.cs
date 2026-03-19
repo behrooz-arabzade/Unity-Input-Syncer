@@ -47,5 +47,12 @@ namespace Tests.EditMode
             });
             data.Dispose();
         }
+
+        [Test]
+        public void LatencyMs_AlwaysReturnsNegativeOne()
+        {
+            var driver = new SocketIODriver();
+            Assert.AreEqual(-1f, driver.LatencyMs);
+        }
     }
 }

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Serialization;
@@ -94,6 +95,17 @@ namespace UnityInputSyncerUTPServer
                 {
                     return new AdminResponse(400, Serialize(new { error = "Invalid JSON body" }));
                 }
+            }
+
+            if (request != null)
+            {
+                var errors = new List<string>();
+                if (request.MaxPlayers.HasValue && request.MaxPlayers.Value < 1)
+                    errors.Add("maxPlayers must be >= 1");
+                if (request.StepIntervalSeconds.HasValue && request.StepIntervalSeconds.Value <= 0)
+                    errors.Add("stepIntervalSeconds must be > 0");
+                if (errors.Count > 0)
+                    return new AdminResponse(400, Serialize(new { error = "Invalid parameters", details = errors }));
             }
 
             try

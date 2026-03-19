@@ -20,6 +20,7 @@ namespace UnityInputSyncerUTPServer
         [SerializeField] private bool allowLateJoin = false;
         [SerializeField] private bool sendStepHistoryOnLateJoin = true;
         [SerializeField] private float heartbeatTimeout = 15f;
+        [SerializeField] private float idleTimeoutSeconds = 0f;
 
         private InputSyncerServerPool pool;
         private AdminHttpServer httpServer;
@@ -39,6 +40,7 @@ namespace UnityInputSyncerUTPServer
         internal bool ConfigAllowLateJoin => allowLateJoin;
         internal bool ConfigSendStepHistoryOnLateJoin => sendStepHistoryOnLateJoin;
         internal float ConfigHeartbeatTimeout => heartbeatTimeout;
+        internal float ConfigIdleTimeoutSeconds => idleTimeoutSeconds;
 
         void Awake()
         {
@@ -59,6 +61,7 @@ namespace UnityInputSyncerUTPServer
                 BasePort = basePort,
                 MaxInstances = maxInstances,
                 AutoRecycleOnFinish = autoRecycleOnFinish,
+                IdleTimeoutSeconds = idleTimeoutSeconds,
                 DefaultServerOptions = new InputSyncerServerOptions
                 {
                     MaxPlayers = maxPlayers,
@@ -75,6 +78,11 @@ namespace UnityInputSyncerUTPServer
             var controller = new AdminController(poolOps, authToken);
             httpServer = new AdminHttpServer(controller, new AdminHttpServerOptions { Port = adminPort });
             httpServer.Start();
+        }
+
+        void Update()
+        {
+            pool?.Tick();
         }
 
         void OnDestroy()
@@ -117,6 +125,9 @@ namespace UnityInputSyncerUTPServer
 
             if (DedicatedServerBootstrap.TryGetEnvFloat("INPUT_SYNCER_HEARTBEAT_TIMEOUT", out var envHeartbeat))
                 heartbeatTimeout = envHeartbeat;
+
+            if (DedicatedServerBootstrap.TryGetEnvFloat("INPUT_SYNCER_IDLE_TIMEOUT", out var envIdleTimeout))
+                idleTimeoutSeconds = envIdleTimeout;
         }
     }
 }

@@ -120,6 +120,13 @@ namespace UnityInputSyncerUTPServer
             return options.MaxInstances - instances.Count;
         }
 
+        public void Tick()
+        {
+            ThrowIfDisposed();
+            ProcessIdleTimeouts();
+            ProcessPendingDestroys();
+        }
+
         public void Dispose()
         {
             if (disposed)
@@ -148,6 +155,10 @@ namespace UnityInputSyncerUTPServer
                 return port;
             }
 
+            if (nextSequentialPort == 0 && usedPorts.Count > 0)
+                throw new InvalidOperationException(
+                    "Cannot allocate port: sequential port range exhausted. Destroy existing instances to recycle ports.");
+
             ushort allocated = nextSequentialPort;
             nextSequentialPort++;
             usedPorts.Add(allocated);
@@ -167,6 +178,25 @@ namespace UnityInputSyncerUTPServer
             if (newState == ServerInstanceState.Finished && options.AutoRecycleOnFinish)
             {
                 pendingDestroys.Add(instance.Id);
+            }
+        }
+
+        private void ProcessIdleTimeouts()
+        {
+            if (options.IdleTimeoutSeconds <= 0f)
+                return;
+
+            var now = DateTime.UtcNow;
+            foreach (var instance in instances.Values)
+            {
+                if (instance.State != ServerInstanceState.Idle && instance.State != ServerInstanceState.Finished)
+                    continue;
+
+                var elapsed = (now - instance.LastStateChangeTime).TotalSeconds;
+                if (elapsed >= options.IdleTimeoutSeconds)
+                {
+                    pendingDestroys.Add(instance.Id);
+                }
             }
         }
 

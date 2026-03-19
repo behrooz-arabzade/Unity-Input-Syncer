@@ -9,6 +9,8 @@ namespace UnityInputSyncerUTPServer
 {
     public class AdminHttpServer : IDisposable
     {
+        private const int MaxBodySize = 1_048_576; // 1 MB
+
         private readonly AdminController controller;
         private readonly HttpListener listener;
         private readonly CancellationTokenSource cts;
@@ -95,13 +97,26 @@ namespace UnityInputSyncerUTPServer
                 return;
             }
 
-            // Read body
+            // Read body (capped at 1 MB)
             string body = null;
             if (request.HasEntityBody)
             {
+                if (request.ContentLength64 > MaxBodySize)
+                {
+                    await WriteResponse(response, 413, "{\"error\":\"Payload too large\"}");
+                    return;
+                }
+
+                var buffer = new char[MaxBodySize + 1];
                 using (var reader = new StreamReader(request.InputStream, request.ContentEncoding))
                 {
-                    body = await reader.ReadToEndAsync();
+                    int totalRead = await reader.ReadAsync(buffer, 0, buffer.Length);
+                    if (totalRead > MaxBodySize)
+                    {
+                        await WriteResponse(response, 413, "{\"error\":\"Payload too large\"}");
+                        return;
+                    }
+                    body = new string(buffer, 0, totalRead);
                 }
             }
 

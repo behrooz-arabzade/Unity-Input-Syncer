@@ -109,6 +109,72 @@ namespace Tests.EditMode
         }
 
         [Test]
+        public async Task PostInstances_MaxPlayersZero_Returns400()
+        {
+            var ctrl = CreateController();
+            var body = "{\"maxPlayers\":0}";
+            var response = await ctrl.HandleRequestAsync("POST", "/api/instances", body);
+
+            Assert.AreEqual(400, response.StatusCode);
+            var json = JObject.Parse(response.Body);
+            Assert.AreEqual("Invalid parameters", json["error"].ToString());
+        }
+
+        [Test]
+        public async Task PostInstances_MaxPlayersNegative_Returns400()
+        {
+            var ctrl = CreateController();
+            var body = "{\"maxPlayers\":-5}";
+            var response = await ctrl.HandleRequestAsync("POST", "/api/instances", body);
+
+            Assert.AreEqual(400, response.StatusCode);
+        }
+
+        [Test]
+        public async Task PostInstances_StepIntervalZero_Returns400()
+        {
+            var ctrl = CreateController();
+            var body = "{\"stepIntervalSeconds\":0}";
+            var response = await ctrl.HandleRequestAsync("POST", "/api/instances", body);
+
+            Assert.AreEqual(400, response.StatusCode);
+        }
+
+        [Test]
+        public async Task PostInstances_StepIntervalNegative_Returns400()
+        {
+            var ctrl = CreateController();
+            var body = "{\"stepIntervalSeconds\":-0.1}";
+            var response = await ctrl.HandleRequestAsync("POST", "/api/instances", body);
+
+            Assert.AreEqual(400, response.StatusCode);
+        }
+
+        [Test]
+        public async Task PostInstances_BothInvalid_Returns400WithBothErrors()
+        {
+            var ctrl = CreateController();
+            var body = "{\"maxPlayers\":0,\"stepIntervalSeconds\":-1}";
+            var response = await ctrl.HandleRequestAsync("POST", "/api/instances", body);
+
+            Assert.AreEqual(400, response.StatusCode);
+            var json = JObject.Parse(response.Body);
+            var details = json["details"] as JArray;
+            Assert.IsNotNull(details);
+            Assert.AreEqual(2, details.Count);
+        }
+
+        [Test]
+        public async Task PostInstances_ValidParams_Returns201()
+        {
+            var ctrl = CreateController();
+            var body = "{\"maxPlayers\":4,\"stepIntervalSeconds\":0.05}";
+            var response = await ctrl.HandleRequestAsync("POST", "/api/instances", body);
+
+            Assert.AreEqual(201, response.StatusCode);
+        }
+
+        [Test]
         public async Task PostInstances_PoolFull_Returns409()
         {
             mockPool.ThrowOnCreate = true;

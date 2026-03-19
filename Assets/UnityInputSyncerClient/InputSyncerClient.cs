@@ -135,6 +135,8 @@ namespace UnityInputSyncerClient
             HandleMatchStarted();
         }
 
+        public float LatencyMs => Driver?.LatencyMs ?? -1f;
+
         public Action OnConnected { get; set; }
         public Action OnReconnected { get; set; }
         public Action<string> OnError { get; set; }

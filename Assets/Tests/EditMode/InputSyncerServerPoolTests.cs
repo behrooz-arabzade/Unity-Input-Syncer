@@ -512,6 +512,132 @@ namespace Tests.EditMode
         }
 
         // =========================================================
+        // Port Overflow Guard (Step 16)
+        // =========================================================
+
+        [Test]
+        public void AllocatePort_NearMax_AllocatesSuccessfully()
+        {
+            CreatePool(new InputSyncerServerPoolOptions { BasePort = 65534, MaxInstances = 2 });
+
+            var i1 = pool.CreateInstance();
+            var i2 = pool.CreateInstance();
+
+            Assert.AreEqual(65534, i1.Port);
+            Assert.AreEqual(65535, i2.Port);
+        }
+
+        [Test]
+        public void AllocatePort_RangeExhausted_ThrowsInvalidOperationException()
+        {
+            CreatePool(new InputSyncerServerPoolOptions { BasePort = 65535, MaxInstances = 2 });
+
+            pool.CreateInstance(); // 65535
+
+            Assert.Throws<InvalidOperationException>(() => pool.CreateInstance());
+        }
+
+        [Test]
+        public void AllocatePort_AfterExhaustion_RecycledPortsStillWork()
+        {
+            CreatePool(new InputSyncerServerPoolOptions { BasePort = 65535, MaxInstances = 2 });
+
+            var i1 = pool.CreateInstance(); // 65535
+            pool.DestroyInstance(i1.Id);
+
+            // Recycled port should work
+            var i2 = pool.CreateInstance();
+            Assert.AreEqual(65535, i2.Port);
+        }
+
+        // =========================================================
+        // Idle Instance Timeout (Step 19)
+        // =========================================================
+
+        [Test]
+        public void IdleTimeout_DisabledByDefault_IdleInstancePersists()
+        {
+            CreatePool(new InputSyncerServerPoolOptions { IdleTimeoutSeconds = 0f });
+            pool.CreateInstance();
+
+            pool.Tick();
+
+            Assert.AreEqual(1, pool.GetInstanceCount());
+        }
+
+        [Test]
+        public void IdleTimeout_DestroysIdleInstance_AfterTimeout()
+        {
+            CreatePool(new InputSyncerServerPoolOptions { IdleTimeoutSeconds = 0.001f });
+            var instance = pool.CreateInstance();
+            Assert.AreEqual(ServerInstanceState.Idle, instance.State);
+
+            // Wait a tiny bit so the timeout fires
+            System.Threading.Thread.Sleep(10);
+            pool.Tick();
+
+            Assert.AreEqual(0, pool.GetInstanceCount());
+        }
+
+        [Test]
+        public void IdleTimeout_DestroysFinishedInstance_AfterTimeout()
+        {
+            CreatePool(new InputSyncerServerPoolOptions
+            {
+                IdleTimeoutSeconds = 0.001f,
+                AutoRecycleOnFinish = false,
+            });
+            var instance = pool.CreateInstance();
+            var socket = GetSocket(0);
+
+            ConnectAndJoin(socket, "alice");
+            instance.Server.StartMatch();
+            instance.Server.FinishMatch();
+            Assert.AreEqual(ServerInstanceState.Finished, instance.State);
+
+            System.Threading.Thread.Sleep(10);
+            pool.Tick();
+
+            Assert.AreEqual(0, pool.GetInstanceCount());
+        }
+
+        [Test]
+        public void IdleTimeout_DoesNotDestroy_InMatchOrWaitingInstances()
+        {
+            CreatePool(new InputSyncerServerPoolOptions { IdleTimeoutSeconds = 0.001f });
+
+            var instance = pool.CreateInstance();
+            var socket = GetSocket(0);
+
+            ConnectAndJoin(socket, "alice");
+            Assert.AreEqual(ServerInstanceState.WaitingForPlayers, instance.State);
+
+            System.Threading.Thread.Sleep(10);
+            pool.Tick();
+
+            Assert.AreEqual(1, pool.GetInstanceCount());
+        }
+
+        [Test]
+        public void IdleTimeout_RecyclesPortsAfterDestruction()
+        {
+            CreatePool(new InputSyncerServerPoolOptions
+            {
+                BasePort = 9000,
+                IdleTimeoutSeconds = 0.001f,
+            });
+
+            pool.CreateInstance();
+            System.Threading.Thread.Sleep(10);
+            pool.Tick();
+
+            Assert.AreEqual(0, pool.GetInstanceCount());
+
+            var newInstance = pool.CreateInstance();
+            Assert.AreEqual(9000, newInstance.Port);
+        }
+
+        // =========================================================
         // Integration
         // =========================================================
 

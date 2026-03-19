@@ -8,6 +8,7 @@ namespace UnityInputSyncerClient
     public abstract class IClientDriver
     {
         public abstract bool IsConnected { get; }
+        public abstract float LatencyMs { get; }
         public abstract Task<bool> ConnectAsync();
         public abstract Task DisconnectAsync();
         public abstract bool Emit(string eventName, object data = null, ClientDriverEmitChannel channel = ClientDriverEmitChannel.Reliable);

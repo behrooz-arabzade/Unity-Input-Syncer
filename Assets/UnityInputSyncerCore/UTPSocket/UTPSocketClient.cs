@@ -1,6 +1,7 @@
 using System;
 using System.Buffers;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Text;
 using Newtonsoft.Json.Linq;
 using Unity.Collections;
@@ -19,6 +20,7 @@ namespace UnityInputSyncerCore.UTPSocket
         public event Action<string> OnError;
 
         public bool IsConnected => State.Connected;
+        public float LatencyMs => State.LatencyMs;
 
         NetworkDriver driver;
         NetworkConnection connection;
@@ -252,6 +254,9 @@ namespace UnityInputSyncerCore.UTPSocket
         {
             State.AwaitingPong = false;
             State.HeartbeatTimeoutTimer = 0f;
+
+            long elapsed = Stopwatch.GetTimestamp() - State.PingSendTimestamp;
+            State.LatencyMs = (float)(elapsed * 1000.0 / Stopwatch.Frequency);
         }
 
         void HandleReconnect(float delta)
@@ -321,6 +326,7 @@ namespace UnityInputSyncerCore.UTPSocket
 
         private void SendHeartbeatPing()
         {
+            State.PingSendTimestamp = Stopwatch.GetTimestamp();
             SendInternal(UTPSocketDataType.HeartbeatPing, default, default, true);
         }
 
@@ -445,5 +451,7 @@ namespace UnityInputSyncerCore.UTPSocket
         public bool Reconnecting;
         public bool Connected;
         public bool Disposed;
+        public long PingSendTimestamp;
+        public float LatencyMs = -1f;
     }
 }
