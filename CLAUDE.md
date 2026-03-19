@@ -126,57 +126,24 @@ Bool values accept `true`/`false` or `1`/`0`. The `Server` property on `Dedicate
 - The wire protocol for UTP is a custom binary format: `[1-byte type][variable header][length-prefixed payload]`. JSON events encode event name + JSON body; binary events encode int event ID + raw bytes.
 - Mock mode (`InputSyncerClientOptions.Mock = true`) runs a local tick loop for development without a server.
 
-## Remaining Steps
+## TODO
 
-Tracked steps to complete the project. Update this list as requirements are added or completed.
+### Priority: Critical
 
-- [x] **Step 1: Create a Ready-Made Dedicated Server Scene** — `Assets/Scenes/DedicatedServerScene.unity` with `DedicatedServerBootstrap` component. _(Requirement #6)_
-- [x] **Step 2: Add Environment Variable Configuration for the Server** — `DedicatedServerBootstrap` reads `INPUT_SYNCER_*` env vars in `Awake()` to override Inspector defaults. _(Requirement #6)_
-- [x] **Step 3: Implement Binary Data Deserialization on the Client** — `UTPClientDriver.GetData<T>(NativeArray<byte>)` throws `NotImplementedException`. Binary events can be sent but not received/deserialized. Need to implement `INativeArraySerializable` deserialization path. _(Requirement #8)_
-- [x] **Step 4: Implement Socket.IO Binary Event Support (or document limitation)** — Socket.IO binary events are intentionally unsupported; methods throw `NotSupportedException` with clear messages. _(Requirement #8)_
-- [x] **Step 5: Add Server-Side Simulation Example** — `ServerSimulationExample` (server-side) and `ServerSimulationClientExample` (client-side) demonstrate authoritative server simulation with shared `MoveInput`/`SimulationGameState` data contracts. _(Requirement #7)_
-- [x] **Step 6: Fill Test Gaps** — Added 17 tests: reconnection flows (5 state + 2 integration), mock mode edge cases (3 edit + 2 play), binary deserialization (3), env var config (2).
-- [x] **Step 7: Multi-Instance Server Pool** — Create a server instance pool that manages multiple `InputSyncerServer` instances, each on a different port. The pool should handle instance lifecycle (create, destroy, recycle) and track instance state (idle, in-match, full). _(Requirement #9)_
-- [x] **Step 8: Admin HTTP Controller with Auth** — Embedded HTTP server with token-based auth (`AdminHttpServer` + `AdminController`). Endpoints: POST/GET/DELETE `/api/instances`, GET `/api/stats`. Auth via `Authorization: Bearer <token>` header. `AdminPoolOperations` bridges HTTP thread to main thread via `UnityThreadDispatcher`. _(Requirement #10)_
-- [x] **Step 9: Monitoring Endpoint** — Enhanced `GET /api/stats` to include per-instance details (`currentStep`, `uptimeSeconds`) and process-level resource usage (`managedMemoryBytes`, `workingSetBytes`, `processorCount`). Null fields omitted for backward compatibility. _(Requirement #11)_
-- [x] **Step 10: Multi-Instance Dedicated Server Scene** — `MultiInstanceServerBootstrap` MonoBehaviour wires together `InputSyncerServerPool`, `AdminPoolOperations`, `AdminController`, and `AdminHttpServer`. Configurable via 11 environment variables (base port, max instances, admin port, auth token, and per-instance server defaults). Scene `MultiInstanceServerScene.unity` must be created manually in Unity Editor. _(Requirements #9, #10, #11)_
+- [ ] **Create `MultiInstanceServerScene.unity`** — The scene referenced by `BuildServer.cs` does not exist. Without it, `make build-multi-server` fails and the multi-instance server cannot be built. Must be created manually in Unity Editor with a single GameObject containing the `MultiInstanceServerBootstrap` component. **Files:** `Assets/Scenes/MultiInstanceServerScene.unity`.
 
-### Bug Fixes & Hardening
+### Priority: High
 
-- [x] **Step 11: Fix Mock Mode Timing Bug** — Replaced `DateTime.UtcNow.Millisecond` with `System.Diagnostics.Stopwatch` in `RunMockInterval()` for monotonic elapsed-time measurement. **Files:** `InputSyncerClient.cs`.
-- [x] **Step 12: Remove Reflection from `GetInputsForStep`** — Replaced reflection-based `GetType().GetProperty("index")` with direct type checks: `JObject` indexer and `BaseInputData.index` field access. **Files:** `InputSyncerState.cs`.
-- [x] **Step 13: Add Client Disconnect & Implement `IDisposable`** — Added `DisconnectAsync()`, updated `Dispose()` to disconnect the driver, declared `: IDisposable` on `InputSyncerClient`. **Files:** `InputSyncerClient.cs`.
-- [x] **Step 14: Enforce Max Player Limit on Server** — Added `MaxPlayers` check in the `"join"` protocol handler. Rejects with `content-error` event (reason: `"match-full"`) without disconnecting the client. **Files:** `InputSyncerServer.cs`.
-- [x] **Step 15: Add Client Connection State Events** — Added `OnConnected`, `OnReconnected`, `OnError`, `OnDisconnected` properties on `InputSyncerClient`, wired from `IClientDriver` delegate fields in constructor. **Files:** `InputSyncerClient.cs`.
-- [x] **Step 16: Guard Port Overflow in Server Pool** — Added overflow check in `AllocatePort()`: throws `InvalidOperationException` when `nextSequentialPort` wraps to 0 and no recycled ports are available. **Files:** `InputSyncerServerPool.cs`.
+- [ ] **Add Server-Side Input Validation** — The server broadcasts all received inputs without validating structure or size. A malicious client could send oversized or malformed input payloads that get broadcast to all clients. Add size limits and schema validation in `InputSyncerServer` before broadcasting. **Files:** `InputSyncerServer.cs`.
+- [ ] **Add Resync Timeout on Client** — `InputSyncerState` requests all steps on a missed step (`request-all-steps`), but has no timeout or retry limit if the server never responds. The client could hang indefinitely. Add a configurable timeout with retry count and a failure callback. **Files:** `InputSyncerState.cs`, `InputSyncerClient.cs`.
+- [ ] **Add Match End Mechanism on Server** — `InputSyncerServer` handles match start and step broadcasting but has no explicit match end. If all clients disconnect, the instance stays in `InMatch` state until idle timeout (if configured) cleans it up. Add explicit match finish detection when all players leave and transition state to `Finished`. **Files:** `InputSyncerServer.cs`, `ServerInstance.cs`.
 
-### Server Hardening
+### Priority: Medium
 
-- [x] **Step 17: Add HTTP Body Size Limit** — Capped request body reads at 1 MB in `AdminHttpServer.HandleContext()`. Checks `Content-Length` header first, then reads into a fixed buffer one char larger than the limit. Returns `413 Payload Too Large` if exceeded. **Files:** `AdminHttpServer.cs`.
-- [x] **Step 18: Validate Admin Instance Creation Parameters** — Added validation in `AdminController.HandleCreateInstance()`: `maxPlayers >= 1`, `stepIntervalSeconds > 0`. Returns `400 Bad Request` with specific error messages and details array. **Files:** `AdminController.cs`.
-- [x] **Step 19: Add Idle Instance Timeout & Graceful Match Cleanup** — Added `IdleTimeoutSeconds` to `InputSyncerServerPoolOptions` (0 = disabled). `ServerInstance` tracks `LastStateChangeTime`. `InputSyncerServerPool.Tick()` calls `ProcessIdleTimeouts()` to destroy `Idle`/`Finished` instances past timeout. `MultiInstanceServerBootstrap` calls `Tick()` in `Update()` and reads `INPUT_SYNCER_IDLE_TIMEOUT` env var. **Files:** `InputSyncerServerPool.cs`, `InputSyncerServerPoolOptions.cs`, `ServerInstance.cs`, `MultiInstanceServerBootstrap.cs`.
+- [ ] **Log Silent Join Rejection** — `InputSyncerServer` returns silently when a player sends "join" but isn't in the Players dict. Add a `Debug.LogWarning` so this condition is visible in server logs rather than silently masking connection issues. **Files:** `InputSyncerServer.cs`.
+- [ ] **Add Admin HTTP Rate Limiting** — The admin HTTP endpoint has authentication but no rate limiting. Repeated requests could stress the pool. Add a simple per-IP request rate limiter to `AdminHttpServer`. **Files:** `AdminHttpServer.cs`.
 
-### Client Features
+### Priority: Low
 
-- [x] **Step 20: Add Client Latency / Ping Measurement** — Measures round-trip time using `Stopwatch.GetTimestamp()` in `UTPSocketClient` heartbeat ping/pong cycle. Exposed as `LatencyMs` property through `ISocketClient` → `IClientDriver` → `InputSyncerClient`. Returns -1f when unsupported (SocketIODriver) or no measurement yet. **Files:** `UTPSocketClient.cs`, `ISocketClient.cs`, `IClientDriver.cs`, `UTPClientDriver.cs`, `SocketIODriver.cs`, `InputSyncerClient.cs`.
-
-### Critical Bugs
-
-- [x] **Step 21: Fix Null Reference in `InputSyncerClient` Constructor** — Changed `options.Mock` to `Options.Mock` and added `ArgumentNullException` guard for null driver when Mock is disabled. **Files:** `InputSyncerClient.cs`.
-- [x] **Step 22: Fix Null Reference in `SocketIODriver.On()` Before Connect** — Added `pendingJsonCallbacks` buffer list. `On()` now buffers callbacks when `Socket` is null, replayed in `ConnectAsync()` after Socket creation. **Files:** `SocketIODriver.cs`.
-
-### Missing Pieces
-
-- [ ] **Step 23: Create `MultiInstanceServerScene.unity`** — Step 10 notes that the scene "must be created manually in Unity Editor" but it still does not exist. Without this scene the multi-instance server cannot be built or used. Create the scene with a single GameObject containing the `MultiInstanceServerBootstrap` component. **Files:** `Assets/Scenes/MultiInstanceServerScene.unity`.
-- [x] **Step 24: Fix `build-server` Makefile Target** — Created `Assets/Editor/BuildServer.cs` with `BuildDedicatedServer()` and `BuildMultiInstanceServer()` methods using `BuildPipeline.BuildPlayer()`. Updated Makefile to use `-executeMethod` and added `build-multi-server` target. **Files:** `Makefile`, `Assets/Editor/BuildServer.cs`.
-
-### Hardening
-
-- [x] **Step 25: Log Network Send Failures** — Added `Debug.LogWarning` with status code before silent returns in `UTPSocketClient.SendInternal()` and both send methods in `UTPSocketServer`. **Files:** `UTPSocketClient.cs`, `UTPSocketServer.cs`.
-- [x] **Step 26: Fix Blocking Async in `Dispose()`** — Replaced `GetAwaiter().GetResult()` with `Task.Run(() => Driver.DisconnectAsync()).Wait(TimeSpan.FromSeconds(2))` to escape Unity synchronization context and prevent deadlock. **Files:** `InputSyncerClient.cs`.
-- [x] **Step 27: Make Mock Mode Input Queue Thread-Safe** — Changed `Queue<BaseInputData>` to `ConcurrentQueue<BaseInputData>` for `ReadyInputToSend`. **Files:** `InputSyncerClient.cs`.
-
-### Polish
-
-- [x] **Step 28: Return Empty List Instead of Null from `GetInputsForStep()`** — Changed `return null` to `return new List<object>()` for safer iteration. **Files:** `InputSyncerState.cs`.
-- [x] **Step 29: Add Graceful Shutdown for `AdminHttpServer`** — Added `inFlightRequests` counter with `Interlocked.Increment/Decrement` around request handling. `Stop()` now spin-waits up to 2 seconds for in-flight requests to drain. **Files:** `AdminHttpServer.cs`.
+- [ ] **Remove Unused `SampleScene.unity`** — Leftover from the Unity project template, serves no purpose. **Files:** `Assets/Scenes/SampleScene.unity`.
+- [ ] **Expose Latency Support Flag on Driver** — `LatencyMs` returns -1 for Socket.IO clients since it's only implemented for UTP. Consumers have no way to check at runtime whether latency measurement is supported without checking the driver type. Add a `bool SupportsLatency` property to `IClientDriver`. **Files:** `IClientDriver.cs`, `UTPClientDriver.cs`, `SocketIODriver.cs`, `InputSyncerClient.cs`.
