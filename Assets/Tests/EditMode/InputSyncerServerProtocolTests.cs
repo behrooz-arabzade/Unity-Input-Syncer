@@ -204,6 +204,115 @@ namespace Tests.EditMode
         }
 
         // =========================================================
+        // Max Player Enforcement
+        // =========================================================
+
+        [Test]
+        public void Join_WhenMatchFull_Rejected_SendsContentError()
+        {
+            server?.Dispose();
+            fakeSocket = new FakeSocketServer();
+            server = new InputSyncerServer(fakeSocket, new InputSyncerServerOptions
+            {
+                MaxPlayers = 2,
+                AutoStartWhenFull = false,
+            });
+
+            ConnectAndJoin("alice");
+            ConnectAndJoin("bob");
+            Assert.AreEqual(2, server.GetJoinedPlayerCount());
+
+            fakeSocket.ClearSentMessages();
+
+            // Third player tries to join
+            int id3 = fakeSocket.SimulateClientConnect();
+            fakeSocket.SimulateJsonEvent(id3, InputSyncerEvents.MATCH_USER_JOIN_EVENT,
+                JObject.FromObject(new { userId = "charlie" }));
+
+            // Should be rejected
+            Assert.AreEqual(2, server.GetJoinedPlayerCount());
+            var errorMsgs = fakeSocket.GetMessagesByEvent(InputSyncerEvents.INPUT_SYNCER_CONTENT_ERROR);
+            Assert.AreEqual(1, errorMsgs.Count);
+            Assert.AreEqual(id3, errorMsgs[0].ConnectionId);
+
+            var errorData = JsonConvert.DeserializeObject<JObject>(errorMsgs[0].Json);
+            Assert.AreEqual("match-full", errorData["reason"].ToString());
+        }
+
+        [Test]
+        public void Join_WhenMatchFull_DoesNotDisconnectClient()
+        {
+            server?.Dispose();
+            fakeSocket = new FakeSocketServer();
+            server = new InputSyncerServer(fakeSocket, new InputSyncerServerOptions
+            {
+                MaxPlayers = 2,
+                AutoStartWhenFull = false,
+            });
+
+            ConnectAndJoin("alice");
+            ConnectAndJoin("bob");
+
+            int id3 = fakeSocket.SimulateClientConnect();
+            fakeSocket.SimulateJsonEvent(id3, InputSyncerEvents.MATCH_USER_JOIN_EVENT,
+                JObject.FromObject(new { userId = "charlie" }));
+
+            // Client should still be in Players (connected but not joined)
+            Assert.AreEqual(3, server.GetPlayerCount());
+            Assert.AreEqual(2, server.GetJoinedPlayerCount());
+        }
+
+        [Test]
+        public void Join_AfterPlayerDisconnect_AllowsNewJoin()
+        {
+            server?.Dispose();
+            fakeSocket = new FakeSocketServer();
+            server = new InputSyncerServer(fakeSocket, new InputSyncerServerOptions
+            {
+                MaxPlayers = 2,
+                AutoStartWhenFull = false,
+            });
+
+            int id1 = ConnectAndJoin("alice");
+            ConnectAndJoin("bob");
+            Assert.AreEqual(2, server.GetJoinedPlayerCount());
+
+            // Disconnect alice — frees a slot
+            fakeSocket.SimulateClientDisconnect(id1);
+            Assert.AreEqual(1, server.GetJoinedPlayerCount());
+
+            // Charlie should now be able to join
+            ConnectAndJoin("charlie");
+            Assert.AreEqual(2, server.GetJoinedPlayerCount());
+        }
+
+        [Test]
+        public void Join_MaxPlayersEnforced_WithLateJoin()
+        {
+            server?.Dispose();
+            fakeSocket = new FakeSocketServer();
+            server = new InputSyncerServer(fakeSocket, new InputSyncerServerOptions
+            {
+                MaxPlayers = 2,
+                AutoStartWhenFull = false,
+                AllowLateJoin = true,
+            });
+
+            ConnectAndJoin("alice");
+            ConnectAndJoin("bob");
+            server.StartMatch();
+
+            // Third player tries to late-join — should still be rejected by MaxPlayers
+            int id3 = fakeSocket.SimulateClientConnect();
+            fakeSocket.SimulateJsonEvent(id3, InputSyncerEvents.MATCH_USER_JOIN_EVENT,
+                JObject.FromObject(new { userId = "charlie" }));
+
+            Assert.AreEqual(2, server.GetJoinedPlayerCount());
+            var player3 = server.GetPlayers().First(p => p.ConnectionId == id3);
+            Assert.IsFalse(player3.Joined);
+        }
+
+        // =========================================================
         // Auto-Start
         // =========================================================
 

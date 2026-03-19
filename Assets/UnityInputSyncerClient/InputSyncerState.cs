@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Newtonsoft.Json.Linq;
 
 namespace UnityInputSyncerClient
 {
@@ -90,9 +91,11 @@ namespace UnityInputSyncerClient
             {
                 return stepInputs.inputs.OrderBy(i =>
                 {
-                    var indexProperty = i.GetType().GetProperty("index");
-                    long index = indexProperty != null ? (long)indexProperty.GetValue(i) : 0;
-                    return index;
+                    if (i is JObject jObj)
+                        return jObj["index"]?.Value<long>() ?? 0L;
+                    if (i is BaseInputData bid)
+                        return bid.index;
+                    return 0L;
                 }).ToList();
             }
 

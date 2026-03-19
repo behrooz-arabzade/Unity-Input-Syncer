@@ -196,6 +196,14 @@ namespace UnityInputSyncerUTPServer
                     return;
                 }
 
+                if (GetJoinedPlayerCount() >= Options.MaxPlayers)
+                {
+                    Debug.LogWarning($"[InputSyncerServer] Player tried to join but match is full ({GetJoinedPlayerCount()}/{Options.MaxPlayers})");
+                    string errorJson = JsonConvert.SerializeObject(new { reason = "match-full", message = $"Match is full ({Options.MaxPlayers} players max)" });
+                    Socket.SendJson(connectionId, InputSyncerEvents.INPUT_SYNCER_CONTENT_ERROR, errorJson);
+                    return;
+                }
+
                 string userId = data is JObject obj ? obj.Value<string>("userId") : null;
                 player.UserId = userId ?? $"player-{connectionId}";
                 player.Joined = true;

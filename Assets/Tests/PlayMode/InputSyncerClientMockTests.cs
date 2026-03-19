@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Diagnostics;
 using System.Linq;
 using Newtonsoft.Json.Linq;
 using NUnit.Framework;
@@ -325,6 +326,48 @@ namespace Tests.PlayMode
                 Assert.IsNotNull(input);
                 Assert.AreEqual(i, input.index, $"Input at position {i} should have index {i}");
             }
+
+            client.Dispose();
+        }
+
+        [UnityTest]
+        public IEnumerator MockClient_StepTiming_NoAccumulatedDrift()
+        {
+            _ = UnityThreadDispatcher.Instance;
+
+            int stepIntervalMs = 100;
+            var options = new InputSyncerClientOptions
+            {
+                Mock = true,
+                StepIntervalMs = stepIntervalMs
+            };
+            var client = new InputSyncerClient(null, options);
+
+            var sw = new Stopwatch();
+            sw.Start();
+
+            var task = client.ConnectAsync();
+            yield return new WaitUntil(() => task.IsCompleted);
+
+            var state = client.GetState();
+
+            int targetSteps = 10;
+            float elapsed = 0f;
+            while (state.LastReceivedStep < targetSteps && elapsed < 5f)
+            {
+                yield return null;
+                elapsed += Time.unscaledDeltaTime;
+            }
+
+            sw.Stop();
+
+            Assert.GreaterOrEqual(state.LastReceivedStep, targetSteps,
+                $"Expected at least {targetSteps} steps");
+
+            // Total time should be roughly targetSteps * interval, with tolerance for scheduling
+            long expectedMs = (targetSteps + 1) * stepIntervalMs;
+            Assert.LessOrEqual(sw.ElapsedMilliseconds, expectedMs + 500,
+                "Steps should not drift significantly — timing bug regression");
 
             client.Dispose();
         }

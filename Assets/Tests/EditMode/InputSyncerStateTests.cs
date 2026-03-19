@@ -1,6 +1,8 @@
 using System.Collections.Generic;
+using Newtonsoft.Json.Linq;
 using NUnit.Framework;
 using UnityInputSyncerClient;
+using UnityInputSyncerClient.Tests;
 
 namespace Tests.EditMode
 {
@@ -319,14 +321,13 @@ namespace Tests.EditMode
         }
 
         [Test]
-        public void GetInputsForStep_OrdersByIndexProperty()
+        public void GetInputsForStep_OrdersByIndex_JObject()
         {
             var state = new InputSyncerState();
 
-            // Create inputs with index property via anonymous objects
-            var input0 = new InputWithIndex { index = 2, value = "c" };
-            var input1 = new InputWithIndex { index = 0, value = "a" };
-            var input2 = new InputWithIndex { index = 1, value = "b" };
+            var input0 = new JObject { ["index"] = 2, ["value"] = "c" };
+            var input1 = new JObject { ["index"] = 0, ["value"] = "a" };
+            var input2 = new JObject { ["index"] = 1, ["value"] = "b" };
 
             state.AddStepInputs(new List<StepInputs>
             {
@@ -335,9 +336,30 @@ namespace Tests.EditMode
 
             var result = state.GetInputsForStep(0);
             Assert.AreEqual(3, result.Count);
-            Assert.AreEqual("a", ((InputWithIndex)result[0]).value);
-            Assert.AreEqual("b", ((InputWithIndex)result[1]).value);
-            Assert.AreEqual("c", ((InputWithIndex)result[2]).value);
+            Assert.AreEqual("a", ((JObject)result[0])["value"].ToString());
+            Assert.AreEqual("b", ((JObject)result[1])["value"].ToString());
+            Assert.AreEqual("c", ((JObject)result[2])["value"].ToString());
+        }
+
+        [Test]
+        public void GetInputsForStep_OrdersBaseInputDataByIndex()
+        {
+            var state = new InputSyncerState();
+
+            var input0 = new TestInput(new TestInputData { action = "c", value = 3 }) { index = 2 };
+            var input1 = new TestInput(new TestInputData { action = "a", value = 1 }) { index = 0 };
+            var input2 = new TestInput(new TestInputData { action = "b", value = 2 }) { index = 1 };
+
+            state.AddStepInputs(new List<StepInputs>
+            {
+                new StepInputs { step = 0, inputs = new List<object> { input0, input1, input2 } }
+            });
+
+            var result = state.GetInputsForStep(0);
+            Assert.AreEqual(3, result.Count);
+            Assert.AreEqual("a", ((TestInput)result[0]).GetData<TestInputData>().action);
+            Assert.AreEqual("b", ((TestInput)result[1]).GetData<TestInputData>().action);
+            Assert.AreEqual("c", ((TestInput)result[2]).GetData<TestInputData>().action);
         }
 
         // ---- Reconnection flow tests ----
@@ -531,9 +553,4 @@ namespace Tests.EditMode
         }
     }
 
-    public class InputWithIndex
-    {
-        public long index { get; set; }
-        public string value;
-    }
 }

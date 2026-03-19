@@ -401,5 +401,118 @@ namespace Tests.EditMode
 
             Assert.IsFalse(result, "SendInput should return false when Driver is null");
         }
+
+        // ---- Disconnect & IDisposable tests (Step 13) ----
+
+        [Test]
+        public void DisconnectAsync_CallsDriverDisconnect()
+        {
+            driver.SetConnected(true);
+            var task = client.DisconnectAsync();
+            task.Wait(1000);
+
+            Assert.IsFalse(driver.IsConnected);
+        }
+
+        [Test]
+        public void DisconnectAsync_WhenNotConnected_DoesNotThrow()
+        {
+            driver.SetConnected(false);
+            Assert.DoesNotThrow(() =>
+            {
+                var task = client.DisconnectAsync();
+                task.Wait(1000);
+            });
+        }
+
+        [Test]
+        public void Dispose_WithConnectedDriver_DisconnectsDriver()
+        {
+            driver.SetConnected(true);
+            client.Dispose();
+
+            Assert.IsFalse(driver.IsConnected);
+        }
+
+        [Test]
+        public void Dispose_ImplementsIDisposable()
+        {
+            Assert.IsTrue(client is IDisposable);
+        }
+
+        // ---- Connection state event tests (Step 15) ----
+
+        [Test]
+        public void Client_ForwardsOnConnected_FromDriver()
+        {
+            bool fired = false;
+            client.OnConnected = () => fired = true;
+
+            driver.OnConnected?.Invoke();
+
+            Assert.IsTrue(fired);
+        }
+
+        [Test]
+        public void Client_ForwardsOnDisconnected_FromDriver()
+        {
+            string receivedReason = null;
+            client.OnDisconnected = (reason) => receivedReason = reason;
+
+            driver.OnDisconnected?.Invoke("transport-closed");
+
+            Assert.AreEqual("transport-closed", receivedReason);
+        }
+
+        [Test]
+        public void Client_ForwardsOnError_FromDriver()
+        {
+            string receivedError = null;
+            client.OnError = (msg) => receivedError = msg;
+
+            driver.OnError?.Invoke("connection-timeout");
+
+            Assert.AreEqual("connection-timeout", receivedError);
+        }
+
+        [Test]
+        public void Client_ForwardsOnReconnected_FromDriver()
+        {
+            bool fired = false;
+            client.OnReconnected = () => fired = true;
+
+            driver.SimulateReconnect();
+
+            Assert.IsTrue(fired);
+        }
+
+        [Test]
+        public void Client_MockMode_DoesNotWireDriverEvents()
+        {
+            var mockClient = new InputSyncerClient(null, new InputSyncerClientOptions { Mock = true });
+
+            // Setting handlers should not throw
+            bool fired = false;
+            mockClient.OnConnected = () => fired = true;
+            mockClient.OnDisconnected = (r) => fired = true;
+            mockClient.OnError = (m) => fired = true;
+            mockClient.OnReconnected = () => fired = true;
+
+            Assert.IsFalse(fired);
+            mockClient.Dispose();
+        }
+
+        [Test]
+        public void Client_EventsNotSet_DoesNotThrow()
+        {
+            // Don't set any handlers, invoke driver events — should not throw
+            Assert.DoesNotThrow(() =>
+            {
+                driver.OnConnected?.Invoke();
+                driver.OnDisconnected?.Invoke("test");
+                driver.OnError?.Invoke("test");
+                driver.OnReconnected?.Invoke();
+            });
+        }
     }
 }

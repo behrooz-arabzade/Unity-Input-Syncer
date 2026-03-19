@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using Newtonsoft.Json.Linq;
 using UnityEngine;
 using System.Threading;
@@ -7,10 +8,11 @@ using System.Threading.Tasks;
 using System.Collections.Concurrent;
 using UnityInputSyncerCore;
 using UnityInputSyncerCore.Utils;
+using Debug = UnityEngine.Debug;
 
 namespace UnityInputSyncerClient
 {
-    public class InputSyncerClient
+    public class InputSyncerClient : IDisposable
     {
         private InputSyncerClientOptions Options;
         public IClientDriver Driver;
@@ -22,6 +24,10 @@ namespace UnityInputSyncerClient
             if (!options.Mock)
             {
                 Driver = driver;
+                Driver.OnConnected += () => OnConnected?.Invoke();
+                Driver.OnReconnected += () => OnReconnected?.Invoke();
+                Driver.OnError += (msg) => OnError?.Invoke(msg);
+                Driver.OnDisconnected += (reason) => OnDisconnected?.Invoke(reason);
             }
 
             InputSyncerState.OnStepMissed += OnStepMissed;
@@ -46,6 +52,21 @@ namespace UnityInputSyncerClient
             return await Driver.ConnectAsync();
         }
 
+        public async Task DisconnectAsync()
+        {
+            if (CancellationTokenSource != null)
+            {
+                CancellationTokenSource.Cancel();
+                CancellationTokenSource.Dispose();
+                CancellationTokenSource = null;
+            }
+
+            if (Driver != null && Driver.IsConnected)
+            {
+                await Driver.DisconnectAsync();
+            }
+        }
+
         private CancellationTokenSource CancellationTokenSource;
         private Queue<BaseInputData> ReadyInputToSend = new Queue<BaseInputData>();
         private void RunMockInterval()
@@ -60,9 +81,10 @@ namespace UnityInputSyncerClient
             Task.Run(async () =>
             {
                 int step = 0;
+                var stopwatch = new Stopwatch();
                 while (!token.IsCancellationRequested)
                 {
-                    int startTime = DateTime.UtcNow.Millisecond;
+                    stopwatch.Restart();
 
                     await Task.Delay(remainingInterval);
 
@@ -89,8 +111,8 @@ namespace UnityInputSyncerClient
 
                     step++;
 
-                    int elapsedTime = DateTime.UtcNow.Millisecond - startTime;
-                    remainingInterval = stepIntervalMs - elapsedTime;
+                    int elapsedMs = (int)stopwatch.ElapsedMilliseconds;
+                    remainingInterval = stepIntervalMs - elapsedMs;
                     if (remainingInterval < 0) remainingInterval = 0;
                 }
             }, token);
@@ -112,6 +134,11 @@ namespace UnityInputSyncerClient
             InputSyncerState.AddAllStepInputs(stepsData.steps, Convert.ToInt32(stepsData.lastSentStep));
             HandleMatchStarted();
         }
+
+        public Action OnConnected { get; set; }
+        public Action OnReconnected { get; set; }
+        public Action<string> OnError { get; set; }
+        public Action<string> OnDisconnected { get; set; }
 
         private bool OnMatchStartedInvoked = false;
         public Action OnMatchStarted { get; set; }
@@ -210,6 +237,12 @@ namespace UnityInputSyncerClient
                 CancellationTokenSource.Cancel();
                 CancellationTokenSource.Dispose();
                 CancellationTokenSource = null;
+            }
+
+            if (Driver != null && Driver.IsConnected)
+            {
+                try { Driver.DisconnectAsync().GetAwaiter().GetResult(); }
+                catch { /* Swallow during disposal */ }
             }
         }
     }
