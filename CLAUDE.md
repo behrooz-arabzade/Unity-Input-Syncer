@@ -159,3 +159,24 @@ Tracked steps to complete the project. Update this list as requirements are adde
 ### Client Features
 
 - [x] **Step 20: Add Client Latency / Ping Measurement** — Measures round-trip time using `Stopwatch.GetTimestamp()` in `UTPSocketClient` heartbeat ping/pong cycle. Exposed as `LatencyMs` property through `ISocketClient` → `IClientDriver` → `InputSyncerClient`. Returns -1f when unsupported (SocketIODriver) or no measurement yet. **Files:** `UTPSocketClient.cs`, `ISocketClient.cs`, `IClientDriver.cs`, `UTPClientDriver.cs`, `SocketIODriver.cs`, `InputSyncerClient.cs`.
+
+### Critical Bugs
+
+- [ ] **Step 21: Fix Null Reference in `InputSyncerClient` Constructor** — Line 24 uses the `options` parameter instead of the `Options` field after null-coalescing assignment. When `options` is passed as `null`, `Options` is correctly set to a new default instance but the original `options` parameter is still `null`, causing a `NullReferenceException` on `options.Mock`. Fix: change `options.Mock` to `Options.Mock`. **Files:** `InputSyncerClient.cs`.
+- [ ] **Step 22: Fix Null Reference in `SocketIODriver.On()` Before Connect** — `On(string, Action<ConnectionResponse>)` calls `Socket.OnUnityThread()` without null-checking `Socket`. If `On()` is called before `ConnectAsync()`, `Socket` is `null` and this throws a `NullReferenceException`. The UTP driver correctly buffers pending callbacks; the Socket.IO driver should do the same. **Files:** `SocketIODriver.cs`.
+
+### Missing Pieces
+
+- [ ] **Step 23: Create `MultiInstanceServerScene.unity`** — Step 10 notes that the scene "must be created manually in Unity Editor" but it still does not exist. Without this scene the multi-instance server cannot be built or used. Create the scene with a single GameObject containing the `MultiInstanceServerBootstrap` component. **Files:** `Assets/Scenes/MultiInstanceServerScene.unity`.
+- [ ] **Step 24: Fix `build-server` Makefile Target** — The `build-server` target does not specify which scene to include in the build. Add `-buildOnlyScene` flag for `DedicatedServerScene.unity`. Add a separate `build-multi-server` target for `MultiInstanceServerScene.unity`. **Files:** `Makefile`.
+
+### Hardening
+
+- [ ] **Step 25: Log Network Send Failures** — `UTPSocketClient` and `UTPSocketServer` both silently return when `driver.BeginSend()` fails (status != 0). Add `Debug.LogWarning` with the status code so the application has visibility into dropped messages. **Files:** `UTPSocketClient.cs`, `UTPSocketServer.cs`.
+- [ ] **Step 26: Fix Blocking Async in `Dispose()`** — `InputSyncerClient.Dispose()` calls `Driver.DisconnectAsync().GetAwaiter().GetResult()`, which can deadlock on the Unity main thread due to the synchronization context. Replace with a synchronous disconnect path or fire-and-forget pattern. **Files:** `InputSyncerClient.cs`.
+- [ ] **Step 27: Make Mock Mode Input Queue Thread-Safe** — `InputSyncerClient.ReadyInputToSend` is a `Queue<>` shared between the mock tick thread and the main thread. Replace with `ConcurrentQueue<>` (already imported but not used for this field) to prevent race conditions. **Files:** `InputSyncerClient.cs`.
+
+### Polish
+
+- [ ] **Step 28: Return Empty List Instead of Null from `GetInputsForStep()`** — `InputSyncerState.GetInputsForStep()` returns `null` when a step is not found, forcing every consumer to null-check. Return an empty `List<JObject>` instead for safer iteration. **Files:** `InputSyncerState.cs`.
+- [ ] **Step 29: Add Graceful Shutdown for `AdminHttpServer`** — `HttpListener.Stop()` is called but pending async operations can throw `ObjectDisposedException`. Wrap the listen loop in a cancellation-aware try/catch and drain pending requests before stopping. **Files:** `AdminHttpServer.cs`.
