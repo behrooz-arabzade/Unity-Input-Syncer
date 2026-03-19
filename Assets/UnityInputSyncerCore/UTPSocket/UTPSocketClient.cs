@@ -339,7 +339,10 @@ namespace UnityInputSyncerCore.UTPSocket
 
             int status = driver.BeginSend(pipe, connection, out var writer);
             if (status != 0)
+            {
+                UnityEngine.Debug.LogWarning($"[UTPSocketClient] BeginSend failed with status {status}");
                 return;
+            }
 
             writer.WriteByte((byte)type);
 

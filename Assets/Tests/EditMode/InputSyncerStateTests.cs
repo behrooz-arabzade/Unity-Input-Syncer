@@ -242,12 +242,17 @@ namespace Tests.EditMode
         }
 
         [Test]
-        public void GetInputsForStep_ReturnsNull_ForMissingStep()
+        public void GetInputsForStep_ReturnsEmptyList_ForMissingStep()
         {
             var state = new InputSyncerState();
 
-            Assert.IsNull(state.GetInputsForStep(0));
-            Assert.IsNull(state.GetInputsForStep(99));
+            var result0 = state.GetInputsForStep(0);
+            Assert.IsNotNull(result0);
+            Assert.AreEqual(0, result0.Count);
+
+            var result99 = state.GetInputsForStep(99);
+            Assert.IsNotNull(result99);
+            Assert.AreEqual(0, result99.Count);
         }
 
         [Test]

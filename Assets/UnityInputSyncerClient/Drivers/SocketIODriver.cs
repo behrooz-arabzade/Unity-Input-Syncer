@@ -51,6 +51,13 @@ namespace UnityInputSyncerClient.Drivers
 
             Socket.JsonSerializer = new NewtonsoftJsonSerializer(Options.JsonSerializerSettings);
 
+            // Replay any event registrations that were buffered before Socket was created
+            foreach (var (eventName, callback) in pendingJsonCallbacks)
+            {
+                On(eventName, callback);
+            }
+            pendingJsonCallbacks.Clear();
+
             RegisterSocketCommonEvents();
 
             try
@@ -140,8 +147,16 @@ namespace UnityInputSyncerClient.Drivers
         private Dictionary<string, List<Action<ConnectionResponse>>> eventCallbacks =
         new Dictionary<string, List<Action<ConnectionResponse>>>();
 
+        private List<(string eventName, Action<ConnectionResponse> callback)> pendingJsonCallbacks = new();
+
         public override void On(string eventName, Action<ConnectionResponse> callback)
         {
+            if (Socket == null)
+            {
+                pendingJsonCallbacks.Add((eventName, callback));
+                return;
+            }
+
             if (!eventCallbacks.ContainsKey(eventName))
             {
                 eventCallbacks.Add(eventName, new List<Action<ConnectionResponse>>());

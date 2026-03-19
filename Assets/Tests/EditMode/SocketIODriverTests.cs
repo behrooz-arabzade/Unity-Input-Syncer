@@ -54,5 +54,15 @@ namespace Tests.EditMode
             var driver = new SocketIODriver();
             Assert.AreEqual(-1f, driver.LatencyMs);
         }
+
+        [Test]
+        public void On_BeforeConnect_DoesNotThrow()
+        {
+            var driver = new SocketIODriver();
+            Assert.DoesNotThrow(() =>
+            {
+                driver.On("test-event", (response) => { });
+            });
+        }
     }
 }

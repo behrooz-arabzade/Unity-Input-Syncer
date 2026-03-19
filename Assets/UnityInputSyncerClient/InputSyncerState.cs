@@ -99,7 +99,7 @@ namespace UnityInputSyncerClient
                 }).ToList();
             }
 
-            return null;
+            return new List<object>();
         }
 
         public bool HasStep(int step)

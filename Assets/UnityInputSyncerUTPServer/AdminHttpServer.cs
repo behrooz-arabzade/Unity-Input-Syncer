@@ -4,6 +4,7 @@ using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
 using UnityEngine;
+using Debug = UnityEngine.Debug;
 
 namespace UnityInputSyncerUTPServer
 {
@@ -14,6 +15,7 @@ namespace UnityInputSyncerUTPServer
         private readonly AdminController controller;
         private readonly HttpListener listener;
         private readonly CancellationTokenSource cts;
+        private int inFlightRequests;
         private bool disposed;
 
         public AdminHttpServer(AdminController controller, AdminHttpServerOptions options = null)
@@ -38,6 +40,13 @@ namespace UnityInputSyncerUTPServer
             if (disposed) return;
             cts.Cancel();
             listener.Stop();
+
+            // Wait up to 2 seconds for in-flight requests to drain
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            while (Interlocked.CompareExchange(ref inFlightRequests, 0, 0) > 0 && sw.ElapsedMilliseconds < 2000)
+            {
+                Thread.Sleep(50);
+            }
         }
 
         public void Dispose()
@@ -67,6 +76,7 @@ namespace UnityInputSyncerUTPServer
                     break;
                 }
 
+                Interlocked.Increment(ref inFlightRequests);
                 try
                 {
                     await HandleContext(context);
@@ -80,6 +90,10 @@ namespace UnityInputSyncerUTPServer
                         context.Response.Close();
                     }
                     catch { }
+                }
+                finally
+                {
+                    Interlocked.Decrement(ref inFlightRequests);
                 }
             }
         }

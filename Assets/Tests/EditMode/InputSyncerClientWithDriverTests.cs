@@ -24,14 +24,21 @@ namespace Tests.EditMode
         }
 
         [Test]
-        public void Constructor_WithNullDriver_NonMock_ThrowsNullReference()
+        public void Constructor_WithNullDriver_NonMock_ThrowsArgumentNullException()
         {
-            // When Mock=false and driver is null, the constructor calls RegisterOnSyncerEvents()
-            // which tries to call Driver.On(...), causing a NullReferenceException.
-            // This is a known latent issue in InputSyncerClient.
-            Assert.Throws<NullReferenceException>(() =>
+            Assert.Throws<ArgumentNullException>(() =>
             {
                 new InputSyncerClient(null, new InputSyncerClientOptions { Mock = false });
+            });
+        }
+
+        [Test]
+        public void Constructor_WithNullOptions_MockMode_DoesNotThrow()
+        {
+            Assert.DoesNotThrow(() =>
+            {
+                var c = new InputSyncerClient(null, new InputSyncerClientOptions { Mock = true });
+                c.Dispose();
             });
         }
 

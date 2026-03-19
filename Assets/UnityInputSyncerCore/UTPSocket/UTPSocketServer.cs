@@ -377,7 +377,10 @@ namespace UnityInputSyncerCore.UTPSocket
         {
             int status = driver.BeginSend(reliable, connection, out var writer);
             if (status != 0)
+            {
+                Debug.LogWarning($"[UTPSocketServer] BeginSend failed with status {status}");
                 return;
+            }
 
             writer.WriteByte((byte)UTPSocketDataType.Handshake);
             writer.WriteByte((byte)(success ? 1 : 0));
@@ -415,7 +418,10 @@ namespace UnityInputSyncerCore.UTPSocket
 
             int status = driver.BeginSend(pipe, connection, out var writer);
             if (status != 0)
+            {
+                Debug.LogWarning($"[UTPSocketServer] BeginSend failed with status {status}");
                 return;
+            }
 
             writer.WriteByte((byte)type);
 

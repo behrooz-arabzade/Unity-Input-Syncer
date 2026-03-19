@@ -2,7 +2,7 @@ UNITY := /Applications/Unity/Hub/Editor/6000.3.0f1/Unity.app/Contents/MacOS/Unit
 PROJECT := $(CURDIR)
 RESULTS_DIR := /tmp
 
-.PHONY: test test-edit test-play build-server
+.PHONY: test test-edit test-play build-server build-multi-server
 
 test: test-edit test-play
 
@@ -21,7 +21,11 @@ test-play:
 build-server:
 	$(UNITY) -batchmode -nographics \
 		-projectPath "$(PROJECT)" \
-		-buildTarget StandaloneOSX \
-		-standaloneBuildSubtarget Server \
-		-buildOutput "$(CURDIR)/Builds/Server" \
+		-executeMethod BuildServer.BuildDedicatedServer \
+		-quit
+
+build-multi-server:
+	$(UNITY) -batchmode -nographics \
+		-projectPath "$(PROJECT)" \
+		-executeMethod BuildServer.BuildMultiInstanceServer \
 		-quit

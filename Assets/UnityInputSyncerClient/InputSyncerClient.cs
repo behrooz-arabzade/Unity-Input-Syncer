@@ -21,8 +21,10 @@ namespace UnityInputSyncerClient
         {
             Options = options ?? new InputSyncerClientOptions();
 
-            if (!options.Mock)
+            if (!Options.Mock)
             {
+                if (driver == null)
+                    throw new ArgumentNullException(nameof(driver), "Driver cannot be null when Mock mode is disabled.");
                 Driver = driver;
                 Driver.OnConnected += () => OnConnected?.Invoke();
                 Driver.OnReconnected += () => OnReconnected?.Invoke();
@@ -68,7 +70,7 @@ namespace UnityInputSyncerClient
         }
 
         private CancellationTokenSource CancellationTokenSource;
-        private Queue<BaseInputData> ReadyInputToSend = new Queue<BaseInputData>();
+        private ConcurrentQueue<BaseInputData> ReadyInputToSend = new ConcurrentQueue<BaseInputData>();
         private void RunMockInterval()
         {
             CancellationTokenSource = new CancellationTokenSource();
@@ -243,7 +245,7 @@ namespace UnityInputSyncerClient
 
             if (Driver != null && Driver.IsConnected)
             {
-                try { Driver.DisconnectAsync().GetAwaiter().GetResult(); }
+                try { Task.Run(() => Driver.DisconnectAsync()).Wait(TimeSpan.FromSeconds(2)); }
                 catch { /* Swallow during disposal */ }
             }
         }
