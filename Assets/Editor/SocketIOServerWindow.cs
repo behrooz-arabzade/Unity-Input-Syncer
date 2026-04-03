@@ -158,7 +158,7 @@ public class SocketIOServerWindow : EditorWindow
         bool hasDist = Directory.Exists(Path.Combine(ServerDir, "dist"));
 
         if (!hasNodeModules)
-            EditorGUILayout.HelpBox("node_modules/ not found. Click Install Dependencies (requires npm on PATH).", MessageType.Warning);
+            EditorGUILayout.HelpBox("node_modules/ not found. Click Install Dependencies (uses your login shell on macOS/Linux so npm from nvm/Homebrew/etc. is found).", MessageType.Warning);
         else if (!hasDist && !isBuilding && !isInstalling)
             EditorGUILayout.HelpBox("dist/ not found. Click Build to compile the server.", MessageType.Info);
 
@@ -316,14 +316,13 @@ public class SocketIOServerWindow : EditorWindow
         {
             var psi = new ProcessStartInfo
             {
-                FileName = ResolveNpm(),
-                Arguments = "install",
                 WorkingDirectory = ServerDir,
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 CreateNoWindow = true,
             };
+            ApplyNpmCommand(psi, "install");
 
             installProcess = new Process { StartInfo = psi, EnableRaisingEvents = true };
             installProcess.OutputDataReceived += (s, e) =>
@@ -397,14 +396,13 @@ public class SocketIOServerWindow : EditorWindow
         {
             var psi = new ProcessStartInfo
             {
-                FileName = ResolveNpm(),
-                Arguments = "run build",
                 WorkingDirectory = ServerDir,
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 CreateNoWindow = true,
             };
+            ApplyNpmCommand(psi, "run build");
 
             buildProcess = new Process { StartInfo = psi, EnableRaisingEvents = true };
             buildProcess.OutputDataReceived += (s, e) => { if (e.Data != null) AppendConsole(e.Data); };
@@ -720,11 +718,18 @@ public class SocketIOServerWindow : EditorWindow
         return $"{bytes / (1024.0 * 1024.0):F1} MB";
     }
 
-    private string ResolveNpm()
+    // Unity's environment often lacks PATH entries for npm (nvm/Homebrew); login+interactive shell fixes that on Unix.
+    private static void ApplyNpmCommand(ProcessStartInfo psi, string npmArguments)
     {
-        if (Application.platform == RuntimePlatform.WindowsEditor)
-            return "npm.cmd";
-        return "npm";
+#if UNITY_EDITOR_WIN
+        psi.FileName = Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe";
+        psi.Arguments = "/c npm " + npmArguments;
+#else
+        var shell = File.Exists("/bin/zsh") ? "/bin/zsh" : "/bin/bash";
+        psi.FileName = shell;
+        var escaped = npmArguments.Replace("\\", "\\\\").Replace("\"", "\\\"");
+        psi.Arguments = "-ilc \"npm " + escaped + "\"";
+#endif
     }
 
     private static void DisposeRequest(ref UnityWebRequest request)
