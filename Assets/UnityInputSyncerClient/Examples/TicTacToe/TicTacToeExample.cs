@@ -7,9 +7,16 @@ namespace UnityInputSyncerClient.Examples.TicTacToe
 {
     public class TicTacToeExample : MonoBehaviour
     {
-        [SerializeField] private string serverIp = "127.0.0.1";
-        [SerializeField] private ushort serverPort = 7777;
+        [Tooltip("Socket.IO HTTP root, e.g. http://localhost:3000 (same port as Socket.IO Server window).")]
+        [SerializeField] private string serverUrl = "http://localhost:3000";
+
+        [Tooltip("Instance ID from Window > Input Syncer > Socket.IO Server after creating a match.")]
+        [SerializeField] private string matchInstanceId = "";
+
         [SerializeField] private string userId = "player-1";
+
+        [Tooltip("Optional. Only needed if the server is configured with INPUT_SYNCER_ADMIN_AUTH_TOKEN for WS auth.")]
+        [SerializeField] private string jwtToken = "";
 
         private enum GameState
         {
@@ -98,7 +105,7 @@ namespace UnityInputSyncerClient.Examples.TicTacToe
                     DrawMenu();
                     break;
                 case GameState.Connecting:
-                    GUI.Label(new Rect(20, 20, 400, 30), $"Connecting to {serverIp}:{serverPort}...");
+                    GUI.Label(new Rect(20, 20, 520, 30), $"Connecting to {serverUrl} (match {matchInstanceId})...");
                     break;
                 case GameState.WaitingForMatch:
                     GUI.Label(new Rect(20, 20, 400, 30), "Connected! Waiting for opponent...");
@@ -120,26 +127,29 @@ namespace UnityInputSyncerClient.Examples.TicTacToe
 
         private void DrawMenu()
         {
-            float x = 20, y = 20, w = 200, h = 25, spacing = 30;
+            float x = 20, y = 20, labelW = 140, fieldW = 360, h = 25, spacing = 30;
 
-            GUI.Label(new Rect(x, y, w, h), "Server IP:");
+            GUI.Label(new Rect(x, y, labelW, h), "Server URL:");
             y += spacing;
-            serverIp = GUI.TextField(new Rect(x, y, w, h), serverIp);
-            y += spacing;
-
-            GUI.Label(new Rect(x, y, w, h), "Server Port:");
-            y += spacing;
-            string portStr = GUI.TextField(new Rect(x, y, w, h), serverPort.ToString());
-            if (ushort.TryParse(portStr, out var parsedPort))
-                serverPort = parsedPort;
+            serverUrl = GUI.TextField(new Rect(x, y, fieldW, h), serverUrl);
             y += spacing;
 
-            GUI.Label(new Rect(x, y, w, h), "User ID:");
+            GUI.Label(new Rect(x, y, labelW, h), "Match instance ID:");
             y += spacing;
-            userId = GUI.TextField(new Rect(x, y, w, h), userId);
+            matchInstanceId = GUI.TextField(new Rect(x, y, fieldW, h), matchInstanceId);
+            y += spacing;
+
+            GUI.Label(new Rect(x, y, labelW, h), "User ID:");
+            y += spacing;
+            userId = GUI.TextField(new Rect(x, y, fieldW, h), userId);
+            y += spacing;
+
+            GUI.Label(new Rect(x, y, labelW, h), "JWT (optional):");
+            y += spacing;
+            jwtToken = GUI.TextField(new Rect(x, y, fieldW, h), jwtToken);
             y += spacing + 10;
 
-            if (GUI.Button(new Rect(x, y, w, h), "Connect"))
+            if (GUI.Button(new Rect(x, y, 200, h), "Connect"))
                 Connect();
         }
 
@@ -215,21 +225,34 @@ namespace UnityInputSyncerClient.Examples.TicTacToe
 
         private async void Connect()
         {
+            if (string.IsNullOrWhiteSpace(serverUrl))
+            {
+                statusMessage = "Enter server URL (e.g. http://localhost:3000).";
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(matchInstanceId))
+            {
+                statusMessage = "Paste match instance ID from the Socket.IO Server window.";
+                return;
+            }
+
             state = GameState.Connecting;
             statusMessage = "";
 
-            var driverOptions = new UTPDriverOptions
+            var url = serverUrl.Trim().TrimEnd('/');
+            var driverOptions = new SocketIODriverOptions
             {
-                Ip = serverIp,
-                Port = serverPort,
+                Url = url,
                 Payload = new Dictionary<string, string>
                 {
-                    { "matchId", "ttt-match" },
+                    { "matchId", matchInstanceId.Trim() },
                     { "userId", userId },
                 },
+                JwtToken = jwtToken ?? "",
             };
 
-            var driver = new UTPClientDriver(driverOptions);
+            var driver = new SocketIODriver(driverOptions);
             client = new InputSyncerClient(driver);
             syncerState = client.GetState();
 
