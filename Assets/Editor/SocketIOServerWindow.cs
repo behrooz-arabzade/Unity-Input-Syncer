@@ -29,7 +29,109 @@ public class SocketIOServerWindow : EditorWindow
     // -------------------------
     // Process state
     // -------------------------
-    private Process serverProcess;
+    /// <summary>
+    /// Shared across window instances so the Node server keeps running when Play Mode disables
+    /// this EditorWindow. Domain reload clears statics, so the child PID is stored in EditorPrefs
+    /// and we reattach with <see cref="Process.GetProcessById"/> after reload.
+    /// </summary>
+    private static Process s_sharedServerProcess;
+
+    private const string ServerChildPidPrefKey = "SocketIOServer_ChildPid";
+    private static bool s_loggedReattachNoticeThisDomain;
+
+    static SocketIOServerWindow()
+    {
+        // Do not call EditorPrefs or TryReattach here — Unity forbids EditorPrefs during
+        // ScriptableObject / EditorWindow type initialization (.cctor). Reattach in OnEnable instead.
+        EditorApplication.quitting += StopSharedServerOnEditorQuit;
+    }
+
+    private static void StopSharedServerOnEditorQuit()
+    {
+        StopSharedServerProcess(killMessageToConsole: false);
+    }
+
+    private static void StoreServerChildPid(int pid)
+    {
+        if (pid > 0)
+            EditorPrefs.SetInt(ServerChildPidPrefKey, pid);
+    }
+
+    private static void ClearStoredServerChildPid()
+    {
+        EditorPrefs.DeleteKey(ServerChildPidPrefKey);
+    }
+
+    /// <summary>
+    /// After a script/domain reload, <see cref="s_sharedServerProcess"/> is null but Node may still be running.
+    /// Restore a <see cref="Process"/> handle from the persisted PID so monitoring and Stop keep working.
+    /// </summary>
+    private static void TryReattachToStoredServerProcess()
+    {
+        if (s_sharedServerProcess != null)
+            return;
+
+        int pid = EditorPrefs.GetInt(ServerChildPidPrefKey, 0);
+        if (pid <= 0)
+            return;
+
+        try
+        {
+            var p = Process.GetProcessById(pid);
+            p.Refresh();
+            if (p.HasExited)
+            {
+                ClearStoredServerChildPid();
+                p.Dispose();
+                return;
+            }
+
+            s_sharedServerProcess = p;
+        }
+        catch (ArgumentException)
+        {
+            ClearStoredServerChildPid();
+        }
+        catch (InvalidOperationException)
+        {
+            ClearStoredServerChildPid();
+        }
+        catch
+        {
+            ClearStoredServerChildPid();
+        }
+    }
+
+    /// <summary>Kills the shared Node process if running. Safe from any thread for the Kill/Dispose portion.</summary>
+    private static void StopSharedServerProcess(bool killMessageToConsole)
+    {
+        TryReattachToStoredServerProcess();
+
+        if (s_sharedServerProcess == null)
+            return;
+
+        if (killMessageToConsole)
+            AppendConsoleToAllOpenWindows("[Editor] Stopping server...");
+
+        try
+        {
+            if (!s_sharedServerProcess.HasExited)
+            {
+                s_sharedServerProcess.Kill();
+                s_sharedServerProcess.WaitForExit(3000);
+            }
+        }
+        catch { }
+
+        try
+        {
+            s_sharedServerProcess.Dispose();
+        }
+        catch { }
+
+        s_sharedServerProcess = null;
+        ClearStoredServerChildPid();
+    }
     private static string sessionResolvedNodeExe;
     private Process buildProcess;
     private Process installProcess;
@@ -71,13 +173,25 @@ public class SocketIOServerWindow : EditorWindow
     {
         LoadPrefs();
         EditorApplication.update += OnEditorUpdate;
+        TryReattachToStoredServerProcess();
+        if (s_sharedServerProcess != null && !s_loggedReattachNoticeThisDomain)
+        {
+            s_loggedReattachNoticeThisDomain = true;
+            int pid = s_sharedServerProcess.Id;
+            AppendConsole(
+                $"[Editor] Reattached to Socket.IO server after domain reload (PID {pid}). " +
+                "Stop Server still works; Node stdout/stderr are only streamed for the session in which you clicked Start Server.");
+        }
+
+        Repaint();
     }
 
     void OnDisable()
     {
         EditorApplication.update -= OnEditorUpdate;
         SavePrefs();
-        StopServer();
+        // Do not stop the Socket.IO server here: OnDisable runs when entering Play Mode, docking
+        // changes, or domain reload — killing Node would drop every connected client.
         StopInstall();
         StopBuild();
         DisposeRequest(ref activeStatsRequest);
@@ -569,12 +683,24 @@ public class SocketIOServerWindow : EditorWindow
             psi.EnvironmentVariables["INPUT_SYNCER_AUTO_RECYCLE"] = autoRecycle ? "true" : "false";
             psi.EnvironmentVariables["INPUT_SYNCER_IDLE_TIMEOUT"] = idleTimeout.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
-            serverProcess = new Process { StartInfo = psi, EnableRaisingEvents = true };
-            serverProcess.OutputDataReceived += (s, e) => { if (e.Data != null) AppendConsole(e.Data); };
-            serverProcess.ErrorDataReceived += (s, e) => { if (e.Data != null) AppendConsole("[stderr] " + e.Data); };
-            serverProcess.Start();
-            serverProcess.BeginOutputReadLine();
-            serverProcess.BeginErrorReadLine();
+            s_sharedServerProcess = new Process { StartInfo = psi, EnableRaisingEvents = true };
+            s_sharedServerProcess.OutputDataReceived += (_, e) =>
+            {
+                if (e.Data == null) return;
+                var line = e.Data;
+                EditorApplication.delayCall += () => AppendConsoleToAllOpenWindows(line);
+            };
+            s_sharedServerProcess.ErrorDataReceived += (_, e) =>
+            {
+                if (e.Data == null) return;
+                var line = "[stderr] " + e.Data;
+                EditorApplication.delayCall += () => AppendConsoleToAllOpenWindows(line);
+            };
+            s_sharedServerProcess.Start();
+            s_sharedServerProcess.BeginOutputReadLine();
+            s_sharedServerProcess.BeginErrorReadLine();
+
+            StoreServerChildPid(s_sharedServerProcess.Id);
 
             latestStats = null;
             pollError = null;
@@ -583,7 +709,8 @@ public class SocketIOServerWindow : EditorWindow
         catch (Exception ex)
         {
             AppendConsole($"[Editor] Failed to start server: {ex.Message}");
-            serverProcess = null;
+            s_sharedServerProcess = null;
+            ClearStoredServerChildPid();
         }
 
         Repaint();
@@ -591,21 +718,11 @@ public class SocketIOServerWindow : EditorWindow
 
     private void StopServer()
     {
-        if (serverProcess == null) return;
+        TryReattachToStoredServerProcess();
+        if (s_sharedServerProcess == null)
+            return;
 
-        AppendConsole("[Editor] Stopping server...");
-        try
-        {
-            if (!serverProcess.HasExited)
-            {
-                serverProcess.Kill();
-                serverProcess.WaitForExit(3000);
-            }
-        }
-        catch { }
-
-        serverProcess.Dispose();
-        serverProcess = null;
+        StopSharedServerProcess(killMessageToConsole: true);
         latestStats = null;
         pollError = null;
         DisposeRequest(ref activeStatsRequest);
@@ -615,32 +732,90 @@ public class SocketIOServerWindow : EditorWindow
 
     private void CheckProcessExited()
     {
-        if (serverProcess == null) return;
+        TryReattachToStoredServerProcess();
+        if (s_sharedServerProcess == null)
+            return;
 
         try
         {
-            if (serverProcess.HasExited)
+            s_sharedServerProcess.Refresh();
+            if (s_sharedServerProcess.HasExited)
             {
-                int code = serverProcess.ExitCode;
+                int code = s_sharedServerProcess.ExitCode;
                 AppendConsole($"[Editor] Server process exited (code {code})");
-                serverProcess.Dispose();
-                serverProcess = null;
+                s_sharedServerProcess.Dispose();
+                s_sharedServerProcess = null;
+                ClearStoredServerChildPid();
                 latestStats = null;
                 Repaint();
             }
         }
         catch
         {
-            serverProcess = null;
+            s_sharedServerProcess = null;
+            ClearStoredServerChildPid();
             latestStats = null;
         }
     }
 
     private bool IsServerRunning()
     {
-        if (serverProcess == null) return false;
-        try { return !serverProcess.HasExited; }
-        catch { serverProcess = null; return false; }
+        TryReattachToStoredServerProcess();
+        if (s_sharedServerProcess == null)
+            return false;
+        try
+        {
+            s_sharedServerProcess.Refresh();
+            if (s_sharedServerProcess.HasExited)
+            {
+                try
+                {
+                    s_sharedServerProcess.Dispose();
+                }
+                catch { }
+
+                s_sharedServerProcess = null;
+                ClearStoredServerChildPid();
+                return false;
+            }
+
+            return true;
+        }
+        catch
+        {
+            try
+            {
+                s_sharedServerProcess?.Dispose();
+            }
+            catch { }
+
+            s_sharedServerProcess = null;
+            ClearStoredServerChildPid();
+            return false;
+        }
+    }
+
+    private static void AppendConsoleToAllOpenWindows(string line)
+    {
+        var windows = Resources.FindObjectsOfTypeAll<SocketIOServerWindow>();
+        if (windows == null || windows.Length == 0)
+        {
+            UnityEngine.Debug.Log($"[Socket.IO Server] {line}");
+            return;
+        }
+
+        foreach (var w in windows)
+        {
+            lock (w.consoleLines)
+            {
+                w.consoleLines.Add(line);
+                while (w.consoleLines.Count > MaxConsoleLines)
+                    w.consoleLines.RemoveAt(0);
+            }
+
+            w.consoleScroll = new Vector2(0, float.MaxValue);
+            w.Repaint();
+        }
     }
 
     // -------------------------
