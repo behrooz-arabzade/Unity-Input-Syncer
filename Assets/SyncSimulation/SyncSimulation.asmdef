@@ -1,0 +1,21 @@
+{
+    "name": "SyncSimulation",
+    "rootNamespace": "SyncSimulation",
+    "references": [
+        "Unity.Collections",
+        "Unity.Entities",
+        "Unity.Mathematics",
+        "UnityInputSyncerClient"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": true,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "Newtonsoft.Json.dll"
+    ],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

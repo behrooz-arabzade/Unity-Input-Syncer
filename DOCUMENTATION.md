@@ -8,6 +8,7 @@ A Unity 6 library for deterministic multiplayer input synchronization using lock
 - [Architecture](#architecture)
 - [Getting Started](#getting-started)
 - [How-To Examples](#how-to-examples)
+- [SyncSimulation (ECS)](#syncsimulation-ecs)
 - [Features](#features)
 
 ---
@@ -67,6 +68,12 @@ The codebase is organized into three main namespaces under `Assets/`:
 - `InputSyncerClient` — Main entry point. Wraps a driver, manages input collection, supports mock mode.
 - `InputSyncerState` — Tracks received steps, detects missed steps, triggers resync.
 - `BaseInputData` — Abstract base class for custom input types.
+
+**SyncSimulation** — Optional ECS layer on top of `InputSyncerClient` (`Assets/SyncSimulation/`).
+
+- `SyncSimulationHost` — Dedicated `Unity.Entities` world, lockstep ingest from `InputSyncerState`, optional local prediction, rollback snapshots, manual `Tick()`.
+- `InputTimeline` — Merges authoritative steps with predicted local input (continuous carry + discrete events per step).
+- `RollbackSnapshotStore` — Ring buffer of blittable component snapshots keyed by completed step; culls mispredicted spawns via `SpawnedOnStep`.
 
 **UnityInputSyncerUTPServer** — Server components for hosting matches.
 
@@ -567,6 +574,46 @@ Note: Custom events via `RegisterOnCustomEvent` are not supported in mock mode.
 
 ---
 
+## SyncSimulation (ECS)
+
+The **SyncSimulation** assembly (`com.unity.entities` 1.4.5+) builds a **simulation-only** ECS world on top of `InputSyncerState`. It does **not** drive GameObjects or rendering; presentation reads state from your own code.
+
+### Responsibilities
+
+- **Lockstep ingest** — Advances the authoritative step cursor whenever `InputSyncerState.HasStep(n)` allows it.
+- **Local prediction** — When `SyncSimulationOptions.MaxPredictionSteps > 0`, simulates ahead of the latest authoritative step. Remote players’ inputs are **carried** from the last authoritative step (repeat last frame’s payloads); document and tune this for your game.
+- **Continuous vs discrete local input** — Call `InputTimeline.SetContinuousLocalSample` for held axes/buttons (re-applied each predicted step). Call `InputTimeline.EnqueueDiscreteLocalForStep(step, input)` for one-shot actions on an exact future step.
+- **Rollback** — Registers blittable `IComponentData` types with `SyncSimulationHost.RegisterRollbackComponent<T>()`. Each completed step stores a snapshot; on local misprediction the host restores the snapshot after step `D - 1` and fast-forwards. Entities created via `SyncSimulationHost.CreateSimEntity()` get `RollbackEntityId` and `SpawnedOnStep`; predicted spawns with a spawn step after the restore point are removed during restore.
+- **Determinism** — The framework only guarantees: *same ordered inputs per step ⇒ same simulation outcome* if your systems and numeric types are deterministic. Floating point, `UnityEngine.Random`, `Time`, Burst, and platform differences are your responsibility (fixed-point, integer math, seeded RNG, etc.).
+
+### Per-step data for systems
+
+Before each `SimulationGroup.Update()`, the host fills:
+
+- `SimulationStepState` on the singleton entity (`SimulationSingletonTag`): `CurrentStep`, `SimulationPhase` (`Authoritative` vs `Predicted`).
+- `DynamicBuffer<JsonInputEventElement>` — one element per merged input, JSON text (same shapes as lockstep wire data). Parse with Newtonsoft or your own decoder inside systems (keep parsing on the main thread if you use managed APIs).
+
+Register your game systems with `host.AddSystemToSimulation(host.World.CreateSystemManaged<MySystem>())`, ordered after the built-in `SimulationInputBridgeSystem` (use `[UpdateAfter(typeof(SimulationInputBridgeSystem))]`).
+
+### Full input resync
+
+When `InputSyncerState.AddAllStepInputs` runs (missed-step recovery), call `SyncSimulationHost.AfterFullInputResync()` so the timeline’s authoritative cursor and rollback baseline stay aligned. Then recreate or re-register simulation entities as your game requires.
+
+### Options (summary)
+
+| Option | Role |
+|--------|------|
+| `LocalUserId` | Used for prediction and misprediction hashing. |
+| `MaxPredictionSteps` | `0` = strict lockstep only. |
+| `MaxRollbackSteps` | Ring buffer depth; must cover worst-case prediction depth. |
+| `MaxSimulateStepsPerTick` | Caps work per `Tick()` call (replay may span multiple frames). |
+
+### JSON size limit
+
+Each `JsonInputEventElement` uses `FixedString512Bytes`. Payloads longer than 512 UTF-8 bytes are truncated with a console warning.
+
+---
+
 ## Features
 
 ### Available
@@ -607,6 +654,12 @@ Note: Custom events via `RegisterOnCustomEvent` are not supported in mock mode.
 - Authenticated admin HTTP API (Bearer token)
 - REST endpoints for creating, listing, inspecting, and destroying instances
 - Pool statistics endpoint for monitoring
+
+**SyncSimulation (ECS)**
+
+- Dedicated Entities world with manual `Tick()`, optional prediction, rollback snapshots for registered components
+- Input timeline merging authoritative lockstep data with local continuous/discrete samples
+- `SpawnedOnStep` / `RollbackEntityId` for culling wrong predicted spawns
 
 **Infrastructure**
 
