@@ -521,7 +521,7 @@ public class SocketIOServerWindow : EditorWindow
         {
             if (!serverProcess.HasExited)
             {
-                serverProcess.Kill(true);
+                serverProcess.Kill();
                 serverProcess.WaitForExit(3000);
             }
         }
