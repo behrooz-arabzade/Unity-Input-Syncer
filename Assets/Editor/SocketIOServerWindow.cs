@@ -29,6 +29,7 @@ public class SocketIOServerWindow : EditorWindow
     // Process state
     // -------------------------
     private Process serverProcess;
+    private static string sessionResolvedNodeExe;
     private Process buildProcess;
     private Process installProcess;
     private bool isBuilding;
@@ -467,17 +468,13 @@ public class SocketIOServerWindow : EditorWindow
                 CreateNoWindow = true,
             };
 
-            var resolvedNode = EditorPrefs.GetString("SocketIOServer_NodePath", "");
-            if (!string.IsNullOrEmpty(resolvedNode) && File.Exists(resolvedNode))
+            if (TryGetNodeExecutableForServer(out var nodeExe))
             {
-                psi.FileName = resolvedNode;
+                psi.FileName = nodeExe;
                 psi.Arguments = "dist/main.js";
             }
             else
-            {
-                // Match ApplyNpmCommand: Unity's process PATH often omits nvm/Homebrew; login shell finds node.
                 ApplyNodeScriptCommand(psi, "dist/main.js");
-            }
 
             psi.EnvironmentVariables["INPUT_SYNCER_PORT"] = port.ToString();
             psi.EnvironmentVariables["INPUT_SYNCER_MAX_PLAYERS"] = maxPlayers.ToString();
@@ -742,6 +739,98 @@ public class SocketIOServerWindow : EditorWindow
         psi.FileName = shell;
         var escaped = relativeScriptPath.Replace("\\", "\\\\").Replace("\"", "\\\"");
         psi.Arguments = "-ilc \"node " + escaped + "\"";
+#endif
+    }
+
+    private static bool TryGetNodeExecutableForServer(out string nodeExe)
+    {
+        var user = EditorPrefs.GetString("SocketIOServer_NodePath", "");
+        if (!string.IsNullOrEmpty(user) && File.Exists(user))
+        {
+            nodeExe = user;
+            return true;
+        }
+
+        if (!string.IsNullOrEmpty(sessionResolvedNodeExe) && File.Exists(sessionResolvedNodeExe))
+        {
+            nodeExe = sessionResolvedNodeExe;
+            return true;
+        }
+
+        var probed = ProbeNodeExecutableFromLoginShell();
+        if (!string.IsNullOrEmpty(probed) && File.Exists(probed))
+        {
+            sessionResolvedNodeExe = probed;
+            nodeExe = probed;
+            return true;
+        }
+
+        nodeExe = null;
+        return false;
+    }
+
+    private static string ProbeNodeExecutableFromLoginShell()
+    {
+#if UNITY_EDITOR_WIN
+        try
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe",
+                Arguments = "/c where node",
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true,
+            };
+            using (var p = Process.Start(psi))
+            {
+                if (p == null) return null;
+                string output = p.StandardOutput.ReadToEnd();
+                p.WaitForExit(20000);
+                if (p.ExitCode != 0) return null;
+                foreach (var line in output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
+                {
+                    var t = line.Trim();
+                    if (t.Length > 0 && File.Exists(t))
+                        return t;
+                }
+            }
+        }
+        catch
+        {
+            return null;
+        }
+        return null;
+#else
+        try
+        {
+            var shell = File.Exists("/bin/zsh") ? "/bin/zsh" : "/bin/bash";
+            var psi = new ProcessStartInfo
+            {
+                FileName = shell,
+                Arguments = "-ilc \"command -v node\"",
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true,
+            };
+            using (var p = Process.Start(psi))
+            {
+                if (p == null) return null;
+                string output = p.StandardOutput.ReadToEnd();
+                p.WaitForExit(20000);
+                if (p.ExitCode != 0) return null;
+                var line = output.Trim().Split(new[] { '\n' }, StringSplitOptions.RemoveEmptyEntries);
+                if (line.Length == 0) return null;
+                var path = line[0].Trim();
+                return path.Length > 0 && File.Exists(path) ? path : null;
+            }
+        }
+        catch
+        {
+            return null;
+        }
 #endif
     }
 
