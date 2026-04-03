@@ -37,7 +37,14 @@ public class SocketIOServerWindow : EditorWindow
     private static Process s_sharedServerProcess;
 
     private const string ServerChildPidPrefKey = "SocketIOServer_ChildPid";
+    private const string EditorLogPathPrefKey = "SocketIOServer_EditorLogPath";
+    private const string SessionConsoleKey = "InputSyncer.SocketIOServer.ConsoleLines.v1";
+    private const string ConsoleLineSeparator = "\u001e";
     private static bool s_loggedReattachNoticeThisDomain;
+    private static bool s_stdioRedirectActive;
+    private static long s_editorLogTailBytes;
+    private static string s_editorLogCarry = "";
+    private static double s_lastEditorLogPollTime;
 
     static SocketIOServerWindow()
     {
@@ -66,14 +73,15 @@ public class SocketIOServerWindow : EditorWindow
     /// After a script/domain reload, <see cref="s_sharedServerProcess"/> is null but Node may still be running.
     /// Restore a <see cref="Process"/> handle from the persisted PID so monitoring and Stop keep working.
     /// </summary>
-    private static void TryReattachToStoredServerProcess()
+    /// <returns>True if a new handle was acquired from the stored PID (domain reload path).</returns>
+    private static bool TryReattachToStoredServerProcess()
     {
         if (s_sharedServerProcess != null)
-            return;
+            return false;
 
         int pid = EditorPrefs.GetInt(ServerChildPidPrefKey, 0);
         if (pid <= 0)
-            return;
+            return false;
 
         try
         {
@@ -83,10 +91,22 @@ public class SocketIOServerWindow : EditorWindow
             {
                 ClearStoredServerChildPid();
                 p.Dispose();
-                return;
+                return false;
+            }
+
+            // Avoid PID reuse: another process may have taken this id after Node exited.
+            if (!LooksLikeNodeProcess(p))
+            {
+                p.Dispose();
+                ClearStoredServerChildPid();
+                EditorApplication.delayCall += () =>
+                    AppendConsoleToAllOpenWindows(
+                        $"[Editor] Ignoring stored server PID {pid} (process name is not Node — likely PID reuse). Use Start Server.");
+                return false;
             }
 
             s_sharedServerProcess = p;
+            return true;
         }
         catch (ArgumentException)
         {
@@ -99,6 +119,20 @@ public class SocketIOServerWindow : EditorWindow
         catch
         {
             ClearStoredServerChildPid();
+        }
+
+        return false;
+    }
+
+    private static bool LooksLikeNodeProcess(Process p)
+    {
+        try
+        {
+            return string.Equals(p.ProcessName, "node", StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
         }
     }
 
@@ -131,6 +165,7 @@ public class SocketIOServerWindow : EditorWindow
 
         s_sharedServerProcess = null;
         ClearStoredServerChildPid();
+        s_stdioRedirectActive = false;
     }
     private static string sessionResolvedNodeExe;
     private Process buildProcess;
@@ -169,18 +204,122 @@ public class SocketIOServerWindow : EditorWindow
         GetWindow<SocketIOServerWindow>("Socket.IO Server");
     }
 
+    private static void PersistConsoleSnapshot(SocketIOServerWindow source)
+    {
+        if (source == null) return;
+        lock (source.consoleLines)
+        {
+            SessionState.SetString(
+                SessionConsoleKey,
+                string.Join(ConsoleLineSeparator, source.consoleLines));
+        }
+    }
+
+    private void RestoreConsoleFromSession()
+    {
+        var blob = SessionState.GetString(SessionConsoleKey, "");
+        if (string.IsNullOrEmpty(blob)) return;
+        lock (consoleLines)
+        {
+            consoleLines.Clear();
+            foreach (var segment in blob.Split(
+                         new[] { ConsoleLineSeparator }, StringSplitOptions.None))
+                consoleLines.Add(segment);
+            while (consoleLines.Count > MaxConsoleLines)
+                consoleLines.RemoveAt(0);
+        }
+    }
+
+    /// <summary>
+    /// After domain reload we lose stdout pipes; Node still mirrors to INPUT_SYNCER_EDITOR_LOG — tail from EOF onward.
+    /// </summary>
+    private static void InitLogTailAfterReattach()
+    {
+        s_stdioRedirectActive = false;
+        s_editorLogCarry = "";
+        var logPath = EditorPrefs.GetString(EditorLogPathPrefKey, "");
+        if (string.IsNullOrEmpty(logPath) || !File.Exists(logPath))
+        {
+            s_editorLogTailBytes = 0;
+            return;
+        }
+
+        try
+        {
+            s_editorLogTailBytes = new FileInfo(logPath).Length;
+        }
+        catch
+        {
+            s_editorLogTailBytes = 0;
+        }
+    }
+
+    private void PollEditorServerLogTail()
+    {
+        if (s_stdioRedirectActive || !IsServerRunning()) return;
+        var path = EditorPrefs.GetString(EditorLogPathPrefKey, "");
+        if (string.IsNullOrEmpty(path) || !File.Exists(path)) return;
+        if (EditorApplication.timeSinceStartup - s_lastEditorLogPollTime < 0.12)
+            return;
+        s_lastEditorLogPollTime = EditorApplication.timeSinceStartup;
+
+        try
+        {
+            using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            if (fs.Length < s_editorLogTailBytes)
+            {
+                s_editorLogTailBytes = 0;
+                s_editorLogCarry = "";
+            }
+
+            var toRead = fs.Length - s_editorLogTailBytes;
+            if (toRead <= 0) return;
+
+            fs.Seek(s_editorLogTailBytes, SeekOrigin.Begin);
+            var buf = new byte[toRead];
+            var read = fs.Read(buf, 0, buf.Length);
+            s_editorLogTailBytes = fs.Length;
+            if (read <= 0) return;
+
+            var chunk = Encoding.UTF8.GetString(buf, 0, read);
+            var full = s_editorLogCarry + chunk;
+            var lastNl = full.LastIndexOf('\n');
+            if (lastNl < 0)
+            {
+                s_editorLogCarry = full;
+                return;
+            }
+
+            var emit = full.Substring(0, lastNl + 1);
+            s_editorLogCarry = full.Substring(lastNl + 1);
+            foreach (var raw in emit.Split(new[] { '\n' }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                var line = raw.TrimEnd('\r');
+                if (line.Length == 0) continue;
+                EditorApplication.delayCall += () => AppendConsoleToAllOpenWindows(line);
+            }
+        }
+        catch
+        {
+            /* ignore */
+        }
+    }
+
     void OnEnable()
     {
         LoadPrefs();
+        RestoreConsoleFromSession();
         EditorApplication.update += OnEditorUpdate;
-        TryReattachToStoredServerProcess();
-        if (s_sharedServerProcess != null && !s_loggedReattachNoticeThisDomain)
+        bool reattached = TryReattachToStoredServerProcess();
+        if (reattached)
+            InitLogTailAfterReattach();
+        if (reattached && s_sharedServerProcess != null && !s_loggedReattachNoticeThisDomain)
         {
             s_loggedReattachNoticeThisDomain = true;
             int pid = s_sharedServerProcess.Id;
             AppendConsole(
                 $"[Editor] Reattached to Socket.IO server after domain reload (PID {pid}). " +
-                "Stop Server still works; Node stdout/stderr are only streamed for the session in which you clicked Start Server.");
+                "Console history was restored; new Node output is tailed from Assets/UnityInputSyncerSocketIOServer/.unity-editor-server-console.log (rebuild server after pulling latest).");
         }
 
         Repaint();
@@ -207,6 +346,7 @@ public class SocketIOServerWindow : EditorWindow
         CheckProcessExited();
         CheckInstallExited();
         CheckBuildExited();
+        PollEditorServerLogTail();
         PollStats();
         ProcessStatsResponse();
         ProcessActionResponse();
@@ -465,7 +605,14 @@ public class SocketIOServerWindow : EditorWindow
         GUILayout.Label("Console output", SectionTitleStyle);
         GUILayout.FlexibleSpace();
         if (GUILayout.Button("Clear", GUILayout.Width(50)))
-            consoleLines.Clear();
+        {
+            lock (consoleLines)
+            {
+                consoleLines.Clear();
+            }
+
+            SessionState.SetString(SessionConsoleKey, "");
+        }
         EditorGUILayout.EndHorizontal();
 
         consoleScroll = EditorGUILayout.BeginScrollView(consoleScroll, GUILayout.Height(140));
@@ -683,6 +830,25 @@ public class SocketIOServerWindow : EditorWindow
             psi.EnvironmentVariables["INPUT_SYNCER_AUTO_RECYCLE"] = autoRecycle ? "true" : "false";
             psi.EnvironmentVariables["INPUT_SYNCER_IDLE_TIMEOUT"] = idleTimeout.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
+            var editorLogPath = Path.Combine(ServerDir, ".unity-editor-server-console.log");
+            try
+            {
+                File.WriteAllText(
+                    editorLogPath,
+                    $"[{DateTime.UtcNow:O}] --- editor log mirror (INPUT_SYNCER_EDITOR_LOG) ---\n",
+                    Encoding.UTF8);
+            }
+            catch
+            {
+                /* non-fatal */
+            }
+
+            EditorPrefs.SetString(EditorLogPathPrefKey, editorLogPath);
+            psi.EnvironmentVariables["INPUT_SYNCER_EDITOR_LOG"] = editorLogPath;
+            s_stdioRedirectActive = true;
+            s_editorLogTailBytes = 0;
+            s_editorLogCarry = "";
+
             s_sharedServerProcess = new Process { StartInfo = psi, EnableRaisingEvents = true };
             s_sharedServerProcess.OutputDataReceived += (_, e) =>
             {
@@ -711,6 +877,7 @@ public class SocketIOServerWindow : EditorWindow
             AppendConsole($"[Editor] Failed to start server: {ex.Message}");
             s_sharedServerProcess = null;
             ClearStoredServerChildPid();
+            s_stdioRedirectActive = false;
         }
 
         Repaint();
@@ -746,6 +913,7 @@ public class SocketIOServerWindow : EditorWindow
                 s_sharedServerProcess.Dispose();
                 s_sharedServerProcess = null;
                 ClearStoredServerChildPid();
+                s_stdioRedirectActive = false;
                 latestStats = null;
                 Repaint();
             }
@@ -754,6 +922,7 @@ public class SocketIOServerWindow : EditorWindow
         {
             s_sharedServerProcess = null;
             ClearStoredServerChildPid();
+            s_stdioRedirectActive = false;
             latestStats = null;
         }
     }
@@ -776,6 +945,7 @@ public class SocketIOServerWindow : EditorWindow
 
                 s_sharedServerProcess = null;
                 ClearStoredServerChildPid();
+                s_stdioRedirectActive = false;
                 return false;
             }
 
@@ -791,6 +961,7 @@ public class SocketIOServerWindow : EditorWindow
 
             s_sharedServerProcess = null;
             ClearStoredServerChildPid();
+            s_stdioRedirectActive = false;
             return false;
         }
     }
@@ -816,6 +987,9 @@ public class SocketIOServerWindow : EditorWindow
             w.consoleScroll = new Vector2(0, float.MaxValue);
             w.Repaint();
         }
+
+        if (windows.Length > 0)
+            PersistConsoleSnapshot(windows[0]);
     }
 
     // -------------------------
@@ -926,7 +1100,9 @@ public class SocketIOServerWindow : EditorWindow
             while (consoleLines.Count > MaxConsoleLines)
                 consoleLines.RemoveAt(0);
         }
+
         consoleScroll = new Vector2(0, float.MaxValue);
+        PersistConsoleSnapshot(this);
     }
 
     // -------------------------

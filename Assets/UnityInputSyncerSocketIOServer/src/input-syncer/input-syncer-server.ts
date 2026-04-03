@@ -148,15 +148,23 @@ export class InputSyncerServer {
     if (!player.joined || !this.state.matchStarted || this.state.matchFinished)
       return;
 
-    if (!data || typeof data !== 'object') return;
+    if (!data || typeof data !== 'object' || Array.isArray(data)) return;
 
     const inputData = data.inputData as Record<string, unknown> | undefined;
-    if (inputData && typeof inputData === 'object') {
-      inputData.userId = player.userId;
-      this.state.pendingInputs.push(inputData);
+    if (
+      inputData &&
+      typeof inputData === 'object' &&
+      !Array.isArray(inputData)
+    ) {
+      this.state.pendingInputs.push({
+        ...inputData,
+        userId: player.userId,
+      });
     } else {
-      data.userId = player.userId;
-      this.state.pendingInputs.push(data);
+      this.state.pendingInputs.push({
+        ...data,
+        userId: player.userId,
+      });
     }
   }
 
@@ -244,13 +252,48 @@ export class InputSyncerServer {
   // -------------------------
 
   private processStep(): void {
+    try {
+      this.processStepCore();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      const stack = e instanceof Error ? e.stack : '';
+      console.error('[InputSyncerServer] processStep FAILED:', msg);
+      if (stack) console.error(stack);
+      try {
+        console.error(
+          '[InputSyncerServer] pendingInputs (JSON):',
+          JSON.stringify(this.state.pendingInputs),
+        );
+      } catch {
+        console.error(
+          '[InputSyncerServer] pendingInputs: (could not JSON.stringify)',
+        );
+      }
+      console.error(
+        '[InputSyncerServer] step=',
+        this.state.currentStep,
+        'matchStarted=',
+        this.state.matchStarted,
+        'matchFinished=',
+        this.state.matchFinished,
+      );
+      throw e;
+    }
+  }
+
+  private processStepCore(): void {
     if (!this.state.matchStarted || this.state.matchFinished) return;
 
     const inputs: Record<string, unknown>[] = [];
     let index = 0;
     for (const pendingInput of this.state.pendingInputs) {
-      pendingInput.index = index++;
-      inputs.push(pendingInput);
+      if (
+        pendingInput &&
+        typeof pendingInput === 'object' &&
+        !Array.isArray(pendingInput)
+      ) {
+        inputs.push({ ...pendingInput, index: index++ });
+      }
     }
     this.state.pendingInputs = [];
 

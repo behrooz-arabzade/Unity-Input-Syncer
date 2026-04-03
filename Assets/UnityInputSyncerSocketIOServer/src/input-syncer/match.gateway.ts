@@ -12,6 +12,39 @@ import { Server, Socket } from 'socket.io';
 import { InputSyncerPoolService } from './pool.service';
 import { InputSyncerEvents } from './input-syncer-events';
 
+/**
+ * SocketIOUnity serializes Emit args as JSON arrays. Unwrap nested `[[{...}]]` down to a plain object.
+ */
+function normalizeMessageBody(data: unknown): Record<string, unknown> | undefined {
+  let current: unknown = data;
+  while (current != null && Array.isArray(current)) {
+    if (current.length === 0) return undefined;
+    current = current[0];
+  }
+  if (
+    current !== null &&
+    typeof current === 'object' &&
+    !Array.isArray(current)
+  ) {
+    return current as Record<string, unknown>;
+  }
+  return undefined;
+}
+
+function logGatewayError(
+  logger: Logger,
+  where: string,
+  socketId: string,
+  e: unknown,
+): void {
+  const msg = e instanceof Error ? e.message : String(e);
+  const stack = e instanceof Error ? e.stack : undefined;
+  logger.error(
+    `${where} (socket=${socketId.slice(0, 12)}…): ${msg}`,
+    stack ?? '',
+  );
+}
+
 @WebSocketGateway({
   path: '/match-gateway',
   transports: ['websocket'],
@@ -29,6 +62,15 @@ export class MatchGateway implements OnGatewayConnection, OnGatewayDisconnect {
   constructor(private readonly pool: InputSyncerPoolService) {}
 
   handleConnection(socket: Socket): void {
+    try {
+      this.handleConnectionInner(socket);
+    } catch (e) {
+      logGatewayError(this.logger, 'handleConnection', socket.id, e);
+      throw e;
+    }
+  }
+
+  private handleConnectionInner(socket: Socket): void {
     const matchId = socket.handshake.query.matchId as string | undefined;
 
     if (!matchId) {
@@ -63,7 +105,16 @@ export class MatchGateway implements OnGatewayConnection, OnGatewayDisconnect {
       event: string,
       data: unknown,
     ) => {
-      this.server.to(targetSocketId).emit(event, data);
+      try {
+        this.server.to(targetSocketId).emit(event, data);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        const stack = e instanceof Error ? e.stack : '';
+        this.logger.error(
+          `emit failed (${event} → ${targetSocketId.slice(0, 8)}…): ${msg}`,
+          stack,
+        );
+      }
     };
 
     instance.server.addPlayer(socket.id);
@@ -88,35 +139,55 @@ export class MatchGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @SubscribeMessage(InputSyncerEvents.MATCH_USER_JOIN_EVENT)
   handleJoin(
     @ConnectedSocket() socket: Socket,
-    @MessageBody() data: Record<string, unknown>,
+    @MessageBody() data: unknown,
   ): void {
-    const server = this.getServerForSocket(socket.id);
-    if (!server) return;
-    server.handleJoin(socket.id, data);
+    try {
+      const server = this.getServerForSocket(socket.id);
+      if (!server) return;
+      server.handleJoin(socket.id, normalizeMessageBody(data));
+    } catch (e) {
+      logGatewayError(this.logger, 'handleJoin', socket.id, e);
+      throw e;
+    }
   }
 
   @SubscribeMessage(InputSyncerEvents.MATCH_USER_INPUT_EVENT)
   handleInput(
     @ConnectedSocket() socket: Socket,
-    @MessageBody() data: Record<string, unknown>,
+    @MessageBody() data: unknown,
   ): void {
-    const server = this.getServerForSocket(socket.id);
-    if (!server) return;
-    server.handleInput(socket.id, data);
+    try {
+      const server = this.getServerForSocket(socket.id);
+      if (!server) return;
+      server.handleInput(socket.id, normalizeMessageBody(data));
+    } catch (e) {
+      logGatewayError(this.logger, 'handleInput', socket.id, e);
+      throw e;
+    }
   }
 
   @SubscribeMessage(InputSyncerEvents.MATCH_USER_FINISH_EVENT)
   handleUserFinish(@ConnectedSocket() socket: Socket): void {
-    const server = this.getServerForSocket(socket.id);
-    if (!server) return;
-    server.handleUserFinish(socket.id);
+    try {
+      const server = this.getServerForSocket(socket.id);
+      if (!server) return;
+      server.handleUserFinish(socket.id);
+    } catch (e) {
+      logGatewayError(this.logger, 'handleUserFinish', socket.id, e);
+      throw e;
+    }
   }
 
   @SubscribeMessage(InputSyncerEvents.MATCH_USER_REQUEST_ALL_STEPS_EVENT)
   handleRequestAllSteps(@ConnectedSocket() socket: Socket): void {
-    const server = this.getServerForSocket(socket.id);
-    if (!server) return;
-    server.handleRequestAllSteps(socket.id);
+    try {
+      const server = this.getServerForSocket(socket.id);
+      if (!server) return;
+      server.handleRequestAllSteps(socket.id);
+    } catch (e) {
+      logGatewayError(this.logger, 'handleRequestAllSteps', socket.id, e);
+      throw e;
+    }
   }
 
   private getServerForSocket(socketId: string) {
