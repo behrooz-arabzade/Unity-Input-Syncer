@@ -52,16 +52,6 @@ public class SocketIOServerWindow : EditorWindow
     // Paths
     // -------------------------
     private string ServerDir => Path.GetFullPath(Path.Combine(Application.dataPath, "UnityInputSyncerSocketIOServer"));
-    private string NodePath
-    {
-        get
-        {
-            var cached = EditorPrefs.GetString("SocketIOServer_NodePath", "");
-            if (!string.IsNullOrEmpty(cached) && File.Exists(cached))
-                return cached;
-            return "node";
-        }
-    }
 
     [MenuItem("Window/Input Syncer/Socket.IO Server")]
     public static void ShowWindow()
@@ -470,14 +460,24 @@ public class SocketIOServerWindow : EditorWindow
         {
             var psi = new ProcessStartInfo
             {
-                FileName = NodePath,
-                Arguments = "dist/main.js",
                 WorkingDirectory = ServerDir,
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 CreateNoWindow = true,
             };
+
+            var resolvedNode = EditorPrefs.GetString("SocketIOServer_NodePath", "");
+            if (!string.IsNullOrEmpty(resolvedNode) && File.Exists(resolvedNode))
+            {
+                psi.FileName = resolvedNode;
+                psi.Arguments = "dist/main.js";
+            }
+            else
+            {
+                // Match ApplyNpmCommand: Unity's process PATH often omits nvm/Homebrew; login shell finds node.
+                ApplyNodeScriptCommand(psi, "dist/main.js");
+            }
 
             psi.EnvironmentVariables["INPUT_SYNCER_PORT"] = port.ToString();
             psi.EnvironmentVariables["INPUT_SYNCER_MAX_PLAYERS"] = maxPlayers.ToString();
@@ -729,6 +729,19 @@ public class SocketIOServerWindow : EditorWindow
         psi.FileName = shell;
         var escaped = npmArguments.Replace("\\", "\\\\").Replace("\"", "\\\"");
         psi.Arguments = "-ilc \"npm " + escaped + "\"";
+#endif
+    }
+
+    private static void ApplyNodeScriptCommand(ProcessStartInfo psi, string relativeScriptPath)
+    {
+#if UNITY_EDITOR_WIN
+        psi.FileName = Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe";
+        psi.Arguments = "/c node " + relativeScriptPath;
+#else
+        var shell = File.Exists("/bin/zsh") ? "/bin/zsh" : "/bin/bash";
+        psi.FileName = shell;
+        var escaped = relativeScriptPath.Replace("\\", "\\\\").Replace("\"", "\\\"");
+        psi.Arguments = "-ilc \"node " + escaped + "\"";
 #endif
     }
 
