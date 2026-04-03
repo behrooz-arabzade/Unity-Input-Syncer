@@ -30,7 +30,9 @@ public class SocketIOServerWindow : EditorWindow
     // -------------------------
     private Process serverProcess;
     private Process buildProcess;
+    private Process installProcess;
     private bool isBuilding;
+    private bool isInstalling;
     private readonly List<string> consoleLines = new List<string>();
     private const int MaxConsoleLines = 200;
     private Vector2 consoleScroll;
@@ -78,6 +80,7 @@ public class SocketIOServerWindow : EditorWindow
         EditorApplication.update -= OnEditorUpdate;
         SavePrefs();
         StopServer();
+        StopInstall();
         StopBuild();
         DisposeRequest(ref activeStatsRequest);
         DisposeRequest(ref activeActionRequest);
@@ -90,6 +93,7 @@ public class SocketIOServerWindow : EditorWindow
     private void OnEditorUpdate()
     {
         CheckProcessExited();
+        CheckInstallExited();
         CheckBuildExited();
         PollStats();
         ProcessStatsResponse();
@@ -123,7 +127,7 @@ public class SocketIOServerWindow : EditorWindow
 
         EditorGUI.indentLevel++;
         bool wasEnabled = GUI.enabled;
-        GUI.enabled = !IsServerRunning() && !isBuilding;
+        GUI.enabled = !IsServerRunning() && !isBuilding && !isInstalling;
 
         port = (ushort)EditorGUILayout.IntField("Port", port);
         maxPlayers = EditorGUILayout.IntField("Max Players", maxPlayers);
@@ -154,20 +158,25 @@ public class SocketIOServerWindow : EditorWindow
         bool hasDist = Directory.Exists(Path.Combine(ServerDir, "dist"));
 
         if (!hasNodeModules)
-            EditorGUILayout.HelpBox("node_modules/ not found. Run 'npm install' in the server directory first.", MessageType.Warning);
-        else if (!hasDist && !isBuilding)
+            EditorGUILayout.HelpBox("node_modules/ not found. Click Install Dependencies (requires npm on PATH).", MessageType.Warning);
+        else if (!hasDist && !isBuilding && !isInstalling)
             EditorGUILayout.HelpBox("dist/ not found. Click Build to compile the server.", MessageType.Info);
 
         EditorGUILayout.BeginHorizontal();
 
-        GUI.enabled = !IsServerRunning() && !isBuilding && hasNodeModules;
+        bool canRunTooling = !IsServerRunning() && !isBuilding && !isInstalling;
+
+        GUI.enabled = canRunTooling;
+        if (GUILayout.Button("Install Dependencies", GUILayout.Width(150)))
+            StartInstall();
+
+        GUI.enabled = canRunTooling && hasNodeModules;
         if (GUILayout.Button("Build", GUILayout.Width(60)))
             StartBuild();
 
-        GUI.enabled = !isBuilding && hasNodeModules;
         if (!IsServerRunning())
         {
-            GUI.enabled = !isBuilding && hasNodeModules && hasDist;
+            GUI.enabled = canRunTooling && hasNodeModules && hasDist;
             if (GUILayout.Button("Start Server"))
                 StartServer();
         }
@@ -182,7 +191,8 @@ public class SocketIOServerWindow : EditorWindow
         EditorGUILayout.EndHorizontal();
 
         string status = "Stopped";
-        if (isBuilding) status = "Building...";
+        if (isInstalling) status = "Installing dependencies...";
+        else if (isBuilding) status = "Building...";
         else if (IsServerRunning()) status = "Running";
 
         EditorGUILayout.LabelField("Status", status);
@@ -292,12 +302,93 @@ public class SocketIOServerWindow : EditorWindow
     }
 
     // -------------------------
+    // PROCESS: NPM INSTALL
+    // -------------------------
+
+    private void StartInstall()
+    {
+        if (isInstalling || isBuilding) return;
+
+        isInstalling = true;
+        AppendConsole("[Editor] Running npm install...");
+
+        try
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = ResolveNpm(),
+                Arguments = "install",
+                WorkingDirectory = ServerDir,
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true,
+            };
+
+            installProcess = new Process { StartInfo = psi, EnableRaisingEvents = true };
+            installProcess.OutputDataReceived += (s, e) =>
+            {
+                if (e.Data != null) AppendConsole("[npm install] " + e.Data);
+            };
+            installProcess.ErrorDataReceived += (s, e) =>
+            {
+                if (e.Data != null) AppendConsole("[npm install] [stderr] " + e.Data);
+            };
+            installProcess.Start();
+            installProcess.BeginOutputReadLine();
+            installProcess.BeginErrorReadLine();
+        }
+        catch (Exception ex)
+        {
+            AppendConsole($"[Editor] npm install failed to start: {ex.Message}");
+            isInstalling = false;
+            installProcess = null;
+        }
+
+        Repaint();
+    }
+
+    private void CheckInstallExited()
+    {
+        if (installProcess == null || !isInstalling) return;
+
+        try
+        {
+            if (installProcess.HasExited)
+            {
+                int code = installProcess.ExitCode;
+                AppendConsole($"[Editor] npm install finished (exit code {code})");
+                installProcess.Dispose();
+                installProcess = null;
+                isInstalling = false;
+                Repaint();
+            }
+        }
+        catch
+        {
+            installProcess = null;
+            isInstalling = false;
+        }
+    }
+
+    private void StopInstall()
+    {
+        if (installProcess != null)
+        {
+            try { if (!installProcess.HasExited) installProcess.Kill(); } catch { }
+            installProcess.Dispose();
+            installProcess = null;
+        }
+        isInstalling = false;
+    }
+
+    // -------------------------
     // PROCESS: BUILD
     // -------------------------
 
     private void StartBuild()
     {
-        if (isBuilding) return;
+        if (isBuilding || isInstalling) return;
 
         isBuilding = true;
         AppendConsole("[Editor] Building server (npm run build)...");
@@ -372,7 +463,7 @@ public class SocketIOServerWindow : EditorWindow
 
     private void StartServer()
     {
-        if (IsServerRunning()) return;
+        if (IsServerRunning() || isBuilding || isInstalling) return;
 
         SavePrefs();
         AppendConsole($"[Editor] Starting server on port {port}...");
