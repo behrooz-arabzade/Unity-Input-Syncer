@@ -1,0 +1,194 @@
+import { Inject, Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
+import { v4 as uuidv4 } from 'uuid';
+import { InputSyncerServer } from './input-syncer-server';
+import {
+  INPUT_SYNCER_OPTIONS,
+  InputSyncerModuleOptions,
+  InputSyncerServerOptions,
+} from './interfaces';
+import { ServerInstance } from './server-instance';
+import { ServerInstanceState } from './types';
+
+@Injectable()
+export class InputSyncerPoolService implements OnModuleDestroy {
+  private readonly logger = new Logger(InputSyncerPoolService.name);
+  private readonly instances = new Map<string, ServerInstance>();
+  private readonly pendingDestroys: string[] = [];
+  private tickInterval: ReturnType<typeof setInterval> | null = null;
+  private disposed = false;
+
+  private readonly maxInstances: number;
+  private readonly autoRecycleOnFinish: boolean;
+  private readonly idleTimeoutSeconds: number;
+  private readonly defaultServerOptions: InputSyncerServerOptions;
+
+  constructor(
+    @Inject(INPUT_SYNCER_OPTIONS)
+    private readonly moduleOptions: InputSyncerModuleOptions,
+  ) {
+    this.maxInstances = moduleOptions.pool?.maxInstances ?? 10;
+    this.autoRecycleOnFinish = moduleOptions.pool?.autoRecycleOnFinish ?? true;
+    this.idleTimeoutSeconds = moduleOptions.pool?.idleTimeoutSeconds ?? 0;
+    this.defaultServerOptions = moduleOptions.defaults ?? {};
+
+    this.tickInterval = setInterval(() => this.tick(), 1000);
+  }
+
+  onModuleDestroy(): void {
+    this.dispose();
+  }
+
+  // -------------------------
+  // INSTANCE CRUD
+  // -------------------------
+
+  createInstance(overrideOptions?: InputSyncerServerOptions): ServerInstance {
+    this.throwIfDisposed();
+    this.processPendingDestroys();
+
+    if (this.instances.size >= this.maxInstances) {
+      throw new Error(
+        `Cannot create instance: pool is full (${this.maxInstances}/${this.maxInstances})`,
+      );
+    }
+
+    const serverOptions: InputSyncerServerOptions = {
+      ...this.defaultServerOptions,
+      ...overrideOptions,
+    };
+
+    const server = new InputSyncerServer(serverOptions);
+    const id = uuidv4();
+    const instance = new ServerInstance(id, server);
+
+    instance.onStateChanged = (inst, _oldState, newState) => {
+      this.logger.log(`Instance ${inst.id} state changed to ${newState}`);
+
+      if (
+        newState === ServerInstanceState.Finished &&
+        this.autoRecycleOnFinish
+      ) {
+        this.pendingDestroys.push(inst.id);
+      }
+    };
+
+    this.instances.set(id, instance);
+    this.logger.log(`Instance ${id} created`);
+
+    return instance;
+  }
+
+  destroyInstance(id: string): boolean {
+    this.throwIfDisposed();
+    this.processPendingDestroys();
+
+    const instance = this.instances.get(id);
+    if (!instance) return false;
+
+    this.destroyInstanceInternal(instance);
+    return true;
+  }
+
+  getInstance(id: string): ServerInstance | undefined {
+    this.throwIfDisposed();
+    return this.instances.get(id);
+  }
+
+  getAllInstances(): ServerInstance[] {
+    this.throwIfDisposed();
+    return [...this.instances.values()];
+  }
+
+  getInstancesByState(state: ServerInstanceState): ServerInstance[] {
+    this.throwIfDisposed();
+    return [...this.instances.values()].filter((i) => i.state === state);
+  }
+
+  getInstanceCount(): number {
+    this.throwIfDisposed();
+    return this.instances.size;
+  }
+
+  getAvailableSlots(): number {
+    this.throwIfDisposed();
+    return this.maxInstances - this.instances.size;
+  }
+
+  // -------------------------
+  // TICK
+  // -------------------------
+
+  private tick(): void {
+    if (this.disposed) return;
+    this.processIdleTimeouts();
+    this.processPendingDestroys();
+  }
+
+  private processIdleTimeouts(): void {
+    if (this.idleTimeoutSeconds <= 0) return;
+
+    const now = Date.now();
+    for (const instance of this.instances.values()) {
+      if (
+        instance.state !== ServerInstanceState.Idle &&
+        instance.state !== ServerInstanceState.Finished
+      )
+        continue;
+
+      const elapsed =
+        (now - instance.lastStateChangeTime.getTime()) / 1000;
+      if (elapsed >= this.idleTimeoutSeconds) {
+        this.pendingDestroys.push(instance.id);
+      }
+    }
+  }
+
+  private processPendingDestroys(): void {
+    if (this.pendingDestroys.length === 0) return;
+
+    const toDestroy = [...this.pendingDestroys];
+    this.pendingDestroys.length = 0;
+
+    for (const id of toDestroy) {
+      const instance = this.instances.get(id);
+      if (instance) {
+        this.destroyInstanceInternal(instance);
+      }
+    }
+  }
+
+  private destroyInstanceInternal(instance: ServerInstance): void {
+    instance.onStateChanged = () => {};
+    this.instances.delete(instance.id);
+    instance.server.dispose();
+    this.logger.log(`Instance ${instance.id} destroyed`);
+  }
+
+  // -------------------------
+  // DISPOSE
+  // -------------------------
+
+  dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
+
+    if (this.tickInterval) {
+      clearInterval(this.tickInterval);
+      this.tickInterval = null;
+    }
+
+    for (const instance of this.instances.values()) {
+      instance.onStateChanged = () => {};
+      instance.server.dispose();
+    }
+
+    this.instances.clear();
+    this.pendingDestroys.length = 0;
+  }
+
+  private throwIfDisposed(): void {
+    if (this.disposed) {
+      throw new Error('InputSyncerPoolService has been disposed');
+    }
+  }
+}
