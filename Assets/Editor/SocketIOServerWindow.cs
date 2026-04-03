@@ -317,6 +317,7 @@ public class SocketIOServerWindow : EditorWindow
         GUILayout.Label("Joined", EditorStyles.miniBoldLabel, GUILayout.Width(50));
         GUILayout.Label("Step", EditorStyles.miniBoldLabel, GUILayout.Width(45));
         GUILayout.Label("Uptime", EditorStyles.miniBoldLabel, GUILayout.Width(60));
+        GUILayout.Label("Copy", EditorStyles.miniBoldLabel, GUILayout.Width(44));
         GUILayout.Label("", GUILayout.Width(50));
         EditorGUILayout.EndHorizontal();
     }
@@ -325,12 +326,19 @@ public class SocketIOServerWindow : EditorWindow
     {
         EditorGUILayout.BeginHorizontal();
         string shortId = inst.id.Length > 8 ? inst.id.Substring(0, 8) : inst.id;
-        GUILayout.Label(shortId, EditorStyles.miniLabel, GUILayout.Width(80));
+        string displayId = inst.id.Length > 8 ? shortId + "…" : shortId;
+        var idTooltip = $"Match / instance ID:\n{inst.id}\n\nUse this value as matchId in the client connection URL/query.";
+        GUILayout.Label(new GUIContent(displayId, idTooltip), EditorStyles.miniLabel, GUILayout.Width(80));
         GUILayout.Label(inst.state, EditorStyles.miniLabel, GUILayout.Width(100));
         GUILayout.Label(inst.playerCount.ToString(), EditorStyles.miniLabel, GUILayout.Width(55));
         GUILayout.Label(inst.joinedPlayerCount.ToString(), EditorStyles.miniLabel, GUILayout.Width(50));
         GUILayout.Label(inst.currentStep.ToString(), EditorStyles.miniLabel, GUILayout.Width(45));
         GUILayout.Label($"{inst.uptimeSeconds:F0}s", EditorStyles.miniLabel, GUILayout.Width(60));
+        if (GUILayout.Button("Copy", EditorStyles.miniButton, GUILayout.Width(44)))
+        {
+            EditorGUIUtility.systemCopyBuffer = inst.id;
+            ShowNotification(new GUIContent("Copied match ID to clipboard (use as matchId when connecting)."));
+        }
         if (GUILayout.Button("Delete", EditorStyles.miniButton, GUILayout.Width(50)))
             DeleteInstance(inst.id);
         EditorGUILayout.EndHorizontal();
