@@ -1,5 +1,6 @@
 ﻿<Solution>
   <Project Path="UnityInputSyncerUTPServer.csproj" />
+  <Project Path="SyncSimulation.csproj" />
   <Project Path="TestHelpers.csproj" />
   <Project Path="UnityInputSyncerCore.csproj" />
   <Project Path="UnityInputSyncerClient.csproj" />
