@@ -1313,7 +1313,17 @@ public class SocketIOServerWindow : EditorWindow
 
         string url = $"{GetAdminApiRoot()}/api/instances";
         activeActionRequest = new UnityWebRequest(url, "POST");
-        activeActionRequest.uploadHandler = new UploadHandlerRaw(Encoding.UTF8.GetBytes("{}"));
+        // Must send explicit fields: POST "{}" used to make Nest pass all-undefined overrides and
+        // wipe INPUT_SYNCER_* defaults (autoStartWhenFull / maxPlayers), so matches never auto-started.
+        string createBody = JsonUtility.ToJson(new CreateInstanceApiBody
+        {
+            maxPlayers = maxPlayers,
+            stepIntervalSeconds = stepInterval,
+            autoStartWhenFull = autoStartWhenFull,
+            allowLateJoin = allowLateJoin,
+            sendStepHistoryOnLateJoin = sendHistoryOnLateJoin
+        });
+        activeActionRequest.uploadHandler = new UploadHandlerRaw(Encoding.UTF8.GetBytes(createBody));
         activeActionRequest.downloadHandler = new DownloadHandlerBuffer();
         activeActionRequest.SetRequestHeader("Content-Type", "application/json");
 
@@ -1925,6 +1935,16 @@ public class SocketIOServerWindow : EditorWindow
     // -------------------------
     // JSON DTOs
     // -------------------------
+
+    [Serializable]
+    private class CreateInstanceApiBody
+    {
+        public int maxPlayers;
+        public float stepIntervalSeconds;
+        public bool autoStartWhenFull;
+        public bool allowLateJoin;
+        public bool sendStepHistoryOnLateJoin;
+    }
 
     [Serializable]
     private class InstanceInfo

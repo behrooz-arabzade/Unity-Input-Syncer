@@ -9,6 +9,32 @@ import {
 import { ServerInstance } from './server-instance';
 import { ServerInstanceState } from './types';
 
+/** Partial overrides must not assign `undefined`, or they would erase pool defaults. */
+function mergeServerOptions(
+  defaults: InputSyncerServerOptions,
+  override?: InputSyncerServerOptions,
+): InputSyncerServerOptions {
+  if (!override) return { ...defaults };
+  return {
+    ...defaults,
+    ...(override.maxPlayers !== undefined
+      ? { maxPlayers: override.maxPlayers }
+      : {}),
+    ...(override.stepIntervalSeconds !== undefined
+      ? { stepIntervalSeconds: override.stepIntervalSeconds }
+      : {}),
+    ...(override.autoStartWhenFull !== undefined
+      ? { autoStartWhenFull: override.autoStartWhenFull }
+      : {}),
+    ...(override.allowLateJoin !== undefined
+      ? { allowLateJoin: override.allowLateJoin }
+      : {}),
+    ...(override.sendStepHistoryOnLateJoin !== undefined
+      ? { sendStepHistoryOnLateJoin: override.sendStepHistoryOnLateJoin }
+      : {}),
+  };
+}
+
 @Injectable()
 export class InputSyncerPoolService implements OnModuleDestroy {
   private readonly logger = new Logger(InputSyncerPoolService.name);
@@ -61,10 +87,10 @@ export class InputSyncerPoolService implements OnModuleDestroy {
       );
     }
 
-    const serverOptions: InputSyncerServerOptions = {
-      ...this.defaultServerOptions,
-      ...overrideOptions,
-    };
+    const serverOptions = mergeServerOptions(
+      this.defaultServerOptions,
+      overrideOptions,
+    );
 
     const server = new InputSyncerServer(serverOptions);
     const id = uuidv4();

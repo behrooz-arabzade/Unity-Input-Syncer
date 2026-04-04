@@ -14,12 +14,30 @@ import * as os from 'os';
 import { InputSyncerPoolService } from './pool.service';
 import { BearerAuthGuard } from './admin.guard';
 import { ServerInstance } from './server-instance';
+import { InputSyncerServerOptions } from './interfaces';
 import {
   AdminCreateInstanceRequest,
   AdminInstanceInfo,
   AdminPoolStats,
   ServerInstanceState,
 } from './types';
+
+/** Only pass fields present on the body so `{}` does not wipe module defaults. */
+function overridesFromCreateBody(
+  body?: AdminCreateInstanceRequest,
+): InputSyncerServerOptions | undefined {
+  if (!body) return undefined;
+  const o: InputSyncerServerOptions = {};
+  if (body.maxPlayers !== undefined) o.maxPlayers = body.maxPlayers;
+  if (body.stepIntervalSeconds !== undefined)
+    o.stepIntervalSeconds = body.stepIntervalSeconds;
+  if (body.autoStartWhenFull !== undefined)
+    o.autoStartWhenFull = body.autoStartWhenFull;
+  if (body.allowLateJoin !== undefined) o.allowLateJoin = body.allowLateJoin;
+  if (body.sendStepHistoryOnLateJoin !== undefined)
+    o.sendStepHistoryOnLateJoin = body.sendStepHistoryOnLateJoin;
+  return Object.keys(o).length > 0 ? o : undefined;
+}
 
 @Controller('api')
 @UseGuards(BearerAuthGuard)
@@ -48,17 +66,7 @@ export class AdminController {
     }
 
     try {
-      const instance = this.pool.createInstance(
-        body
-          ? {
-              maxPlayers: body.maxPlayers,
-              autoStartWhenFull: body.autoStartWhenFull,
-              stepIntervalSeconds: body.stepIntervalSeconds,
-              allowLateJoin: body.allowLateJoin,
-              sendStepHistoryOnLateJoin: body.sendStepHistoryOnLateJoin,
-            }
-          : undefined,
-      );
+      const instance = this.pool.createInstance(overridesFromCreateBody(body));
 
       return mapToInfo(instance);
     } catch (err) {

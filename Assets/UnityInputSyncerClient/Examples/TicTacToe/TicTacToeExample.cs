@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using Newtonsoft.Json.Linq;
 using UnityEngine;
@@ -5,6 +6,13 @@ using UnityInputSyncerClient.Drivers;
 
 namespace UnityInputSyncerClient.Examples.TicTacToe
 {
+    /// <summary>
+    /// Socket.IO flow (see Nest <c>MatchGateway</c> + <c>InputSyncerServer</c>):
+    /// connect with query <c>matchId</c> (+ optional <c>userId</c>) → server adds the socket and
+    /// treats it as joined (auto-start when joined count reaches max). The client still calls
+    /// <see cref="InputSyncerClient.JoinMatch"/> so older servers and explicit userId stay supported.
+    /// When the match starts, the server emits <c>on-start</c> then periodic <c>on-steps</c>.
+    /// </summary>
     public class TicTacToeExample : MonoBehaviour
     {
         [Tooltip("Socket.IO HTTP root, e.g. http://localhost:3000 (same port as Socket.IO Server window).")]
@@ -13,7 +21,8 @@ namespace UnityInputSyncerClient.Examples.TicTacToe
         [Tooltip("Instance ID from Window > Input Syncer > Socket.IO Server after creating a match.")]
         [SerializeField] private string matchInstanceId = "";
 
-        [SerializeField] private string userId = "player-1";
+        [Tooltip("Must be unique per client (e.g. player-1 vs player-2). Leave empty to auto-generate a unique id for this session (recommended when testing two builds with default settings).")]
+        [SerializeField] private string userId = "";
 
         [Tooltip("Optional. Only needed if the server is configured with INPUT_SYNCER_ADMIN_AUTH_TOKEN for WS auth.")]
         [SerializeField] private string jwtToken = "";
@@ -39,6 +48,9 @@ namespace UnityInputSyncerClient.Examples.TicTacToe
         private string xPlayerId;
         private string oPlayerId;
         private CellState mySymbol;
+
+        /// <summary>Effective user id for this connection (inspector value or auto-generated).</summary>
+        private string sessionUserId = "";
 
         private string statusMessage = "";
 
@@ -70,7 +82,7 @@ namespace UnityInputSyncerClient.Examples.TicTacToe
                         {
                             xPlayerId = readyPlayers[0];
                             oPlayerId = readyPlayers[1];
-                            mySymbol = userId == xPlayerId ? CellState.X : CellState.O;
+                            mySymbol = sessionUserId == xPlayerId ? CellState.X : CellState.O;
                             board = new TicTacToeBoard();
                             state = GameState.Playing;
                         }
@@ -240,6 +252,10 @@ namespace UnityInputSyncerClient.Examples.TicTacToe
             state = GameState.Connecting;
             statusMessage = "";
 
+            sessionUserId = string.IsNullOrWhiteSpace(userId)
+                ? "player-" + Guid.NewGuid().ToString("N").Substring(0, 8)
+                : userId.Trim();
+
             var url = serverUrl.Trim().TrimEnd('/');
             var driverOptions = new SocketIODriverOptions
             {
@@ -247,7 +263,7 @@ namespace UnityInputSyncerClient.Examples.TicTacToe
                 Payload = new Dictionary<string, string>
                 {
                     { "matchId", matchInstanceId.Trim() },
-                    { "userId", userId },
+                    { "userId", sessionUserId },
                 },
                 JwtToken = jwtToken ?? "",
             };
@@ -278,7 +294,7 @@ namespace UnityInputSyncerClient.Examples.TicTacToe
             Debug.Log($"Connected: {connected}");
             if (connected)
             {
-                client.JoinMatch(userId);
+                client.JoinMatch(sessionUserId);
                 state = GameState.WaitingForMatch;
             }
             else
@@ -299,6 +315,7 @@ namespace UnityInputSyncerClient.Examples.TicTacToe
             oPlayerId = null;
             nextStepToProcess = 0;
             statusMessage = "";
+            sessionUserId = "";
             state = GameState.Menu;
         }
 

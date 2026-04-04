@@ -106,7 +106,18 @@ export class InputSyncerServer {
   handleJoin(socketId: string, data?: Record<string, unknown>): void {
     const player = this.state.players.get(socketId);
     if (!player) return;
-    if (player.joined) return;
+
+    if (player.joined) {
+      if (
+        !this.state.matchStarted &&
+        data?.userId != null &&
+        typeof data.userId === 'string' &&
+        data.userId.length > 0
+      ) {
+        player.userId = data.userId;
+      }
+      return;
+    }
 
     if (this.state.matchStarted && !this.options.allowLateJoin) return;
 

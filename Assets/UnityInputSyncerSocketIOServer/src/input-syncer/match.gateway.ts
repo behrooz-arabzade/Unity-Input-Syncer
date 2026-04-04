@@ -32,6 +32,25 @@ function normalizeMessageBody(data: unknown): Record<string, unknown> | undefine
   return undefined;
 }
 
+/** Socket.IO query values are often `string | string[]`. */
+function firstQueryString(
+  value: string | string[] | undefined,
+): string | undefined {
+  if (typeof value === 'string' && value.length > 0) return value;
+  if (Array.isArray(value) && value.length > 0 && typeof value[0] === 'string') {
+    return value[0].length > 0 ? value[0] : undefined;
+  }
+  return undefined;
+}
+
+function joinPayloadFromQuery(
+  query: Socket['handshake']['query'],
+): Record<string, unknown> | undefined {
+  const userId = firstQueryString(query.userId);
+  if (userId) return { userId };
+  return undefined;
+}
+
 function logGatewayError(
   logger: Logger,
   where: string,
@@ -178,6 +197,11 @@ export class MatchGateway
     };
 
     instance.server.addPlayer(socket.id);
+    // Connected sockets must be "joined" for auto-start and step delivery; many
+    // clients only call Connect (query carries matchId / optional userId) and
+    // never emit `join`, which left playerCount at 2 while joinedPlayerCount
+    // stayed 0 and the match never started.
+    instance.server.handleJoin(socket.id, joinPayloadFromQuery(socket.handshake.query));
     this.logger.log(`Socket ${socket.id} connected to match ${matchId}`);
   }
 
