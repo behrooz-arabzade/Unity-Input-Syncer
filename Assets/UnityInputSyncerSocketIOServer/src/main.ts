@@ -79,9 +79,19 @@ async function bootstrap() {
   app.enableCors();
 
   const port = parseInt(process.env.INPUT_SYNCER_PORT ?? '3000', 10);
-  await app.listen(port);
+  const bind = process.env.INPUT_SYNCER_BIND;
+  if (bind) {
+    await app.listen(port, bind);
+  } else {
+    await app.listen(port);
+  }
 
-  console.log(`${LOG} Listening on port ${port}`);
+  const role = process.env.INPUT_SYNCER_ROLE ?? '';
+  const where =
+    bind !== undefined ? `${bind}:${port}` : `port ${port}`;
+  console.log(
+    `${LOG} Listening on ${where}${role ? ` (role=${role})` : ''}`,
+  );
   console.log(`${LOG} Admin API: http://localhost:${port}/api`);
   console.log(`${LOG} WebSocket path: /match-gateway`);
 }

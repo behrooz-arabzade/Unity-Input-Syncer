@@ -28,6 +28,10 @@ public class SocketIOServerWindow : EditorWindow
     private int maxInstances = 10;
     private bool autoRecycle = true;
     private float idleTimeout = 0f;
+    /// <summary>When true, Unity starts <c>dist/cluster-primary.js</c> (multi-process + one public port).</summary>
+    private bool useMultiCoreCluster;
+    /// <summary>0 = Node default max(1, CPU count − 1); otherwise <c>INPUT_SYNCER_WORKER_COUNT</c>.</summary>
+    private int clusterWorkerCount;
 
     private bool showConfig = true;
     /// <summary>
@@ -441,6 +445,28 @@ public class SocketIOServerWindow : EditorWindow
         idleTimeout = EditorGUILayout.FloatField("Idle Timeout (s)", idleTimeout);
 
         EditorGUILayout.Space(2);
+        bool prevCluster = useMultiCoreCluster;
+        int prevWorkerCount = clusterWorkerCount;
+        useMultiCoreCluster = EditorGUILayout.ToggleLeft(
+            new GUIContent(
+                "Multi-core cluster (single machine)",
+                "Spawns multiple worker processes (each with its own match pool on 127.0.0.1) and a primary on the Port below. Internal worker ports default to Port+1, Port+2, … Requires npm run build; entry is dist/cluster-primary.js."),
+            useMultiCoreCluster);
+        if (useMultiCoreCluster)
+        {
+            EditorGUI.indentLevel++;
+            clusterWorkerCount = EditorGUILayout.IntField(
+                new GUIContent(
+                    "Worker count",
+                    "0 = automatic max(1, logical CPU count − 1). Otherwise sets INPUT_SYNCER_WORKER_COUNT."),
+                clusterWorkerCount);
+            clusterWorkerCount = Mathf.Max(0, clusterWorkerCount);
+            EditorGUI.indentLevel--;
+        }
+        if (prevCluster != useMultiCoreCluster || prevWorkerCount != clusterWorkerCount)
+            SavePrefs();
+
+        EditorGUILayout.Space(2);
         GUILayout.Label("Admin", EditorStyles.miniBoldLabel);
         adminAuthToken = EditorGUILayout.TextField("Auth Token", adminAuthToken);
         EditorGUI.BeginChangeCheck();
@@ -540,7 +566,10 @@ public class SocketIOServerWindow : EditorWindow
 
         EditorGUILayout.EndHorizontal();
         if (runServerExternally)
-            EditorGUILayout.HelpBox("Use Install / Build here if needed, then run Node from your terminal using the snippet below.", MessageType.None);
+            EditorGUILayout.HelpBox(
+                "Use Install / Build here if needed, then run Node from your terminal using the snippet below. " +
+                "Keep Server Configuration in sync: if Multi-core cluster is enabled there, use the snippet’s npm run start:cluster (not start:prod).",
+                MessageType.None);
 
         EditorGUILayout.Space(6);
         DrawServerStatusRow();
@@ -557,6 +586,10 @@ public class SocketIOServerWindow : EditorWindow
         EditorGUILayout.HelpBox(
             "Use the same Port and Auth Token as on the machine where Node runs (or set API base URL to your remote admin URL and token). " +
             "Game clients use the Socket.IO URL for that host (e.g. http://localhost:<port> locally, or ws/http to your dev server — see TicTacToeExample). " +
+            (useMultiCoreCluster
+                ? "Multi-core cluster is enabled in Server Configuration: the snippet runs npm run start:cluster. The primary listens on Port; worker processes listen on 127.0.0.1 at Port+1, Port+2, … on that same machine—clients and admin still use Port only. " +
+                  "Override worker count with Worker count or INPUT_SYNCER_WORKER_COUNT in the snippet when non-zero. "
+                : "") +
             "Optional: set INPUT_SYNCER_EDITOR_LOG on the server host to mirror logs into this window’s console (see snippet; only works if that path is readable from your Mac, e.g. SSHFS or local run).",
             MessageType.None);
 
@@ -609,11 +642,23 @@ public class SocketIOServerWindow : EditorWindow
         sb.AppendLine($"export INPUT_SYNCER_EDITOR_LOG=\"{logPath}\"");
         sb.AppendLine();
         sb.AppendLine("# After: npm install && npm run build");
-        sb.AppendLine("npm run start:prod");
+        if (useMultiCoreCluster)
+        {
+            sb.AppendLine("# Multi-core: primary listens on INPUT_SYNCER_PORT; workers on 127.0.0.1:(PORT+1)…");
+            if (clusterWorkerCount > 0)
+                sb.AppendLine($"export INPUT_SYNCER_WORKER_COUNT={clusterWorkerCount}");
+            sb.AppendLine("npm run start:cluster");
+        }
+        else
+        {
+            sb.AppendLine("npm run start:prod");
+        }
         sb.AppendLine();
         sb.AppendLine("# Dev (rebuild on change): npm run start:dev");
+        if (useMultiCoreCluster)
+            sb.AppendLine("# Note: start:dev is single-process only; for multi-core after edits use: npm run build && npm run start:cluster");
         sb.AppendLine();
-        sb.AppendLine("# Windows (cmd): use set VAR=value then node dist\\main.js or npm run start:prod");
+        sb.AppendLine("# Windows (cmd): use set VAR=value then node dist\\main.js or dist\\cluster-primary.js");
         return sb.ToString();
     }
 
@@ -988,7 +1033,9 @@ public class SocketIOServerWindow : EditorWindow
         if (runServerExternally || IsManagedServerRunning() || isBuilding || isInstalling) return;
 
         SavePrefs();
-        AppendConsole($"[Editor] Starting server on port {port}...");
+        AppendConsole(useMultiCoreCluster
+            ? $"[Editor] Starting multi-core cluster on public port {port}…"
+            : $"[Editor] Starting server on port {port}...");
 
         try
         {
@@ -1001,13 +1048,14 @@ public class SocketIOServerWindow : EditorWindow
                 CreateNoWindow = true,
             };
 
+            string serverEntry = useMultiCoreCluster ? "dist/cluster-primary.js" : "dist/main.js";
             if (TryGetNodeExecutableForServer(out var nodeExe))
             {
                 psi.FileName = nodeExe;
-                psi.Arguments = "dist/main.js";
+                psi.Arguments = serverEntry;
             }
             else
-                ApplyNodeScriptCommand(psi, "dist/main.js");
+                ApplyNodeScriptCommand(psi, serverEntry);
 
             psi.EnvironmentVariables["INPUT_SYNCER_PORT"] = port.ToString();
             psi.EnvironmentVariables["INPUT_SYNCER_MAX_PLAYERS"] = maxPlayers.ToString();
@@ -1019,6 +1067,8 @@ public class SocketIOServerWindow : EditorWindow
             psi.EnvironmentVariables["INPUT_SYNCER_MAX_INSTANCES"] = maxInstances.ToString();
             psi.EnvironmentVariables["INPUT_SYNCER_AUTO_RECYCLE"] = autoRecycle ? "true" : "false";
             psi.EnvironmentVariables["INPUT_SYNCER_IDLE_TIMEOUT"] = idleTimeout.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            if (useMultiCoreCluster && clusterWorkerCount > 0)
+                psi.EnvironmentVariables["INPUT_SYNCER_WORKER_COUNT"] = clusterWorkerCount.ToString();
 
             var editorLogPath = Path.Combine(ServerDir, ".unity-editor-server-console.log");
             try
@@ -1320,6 +1370,8 @@ public class SocketIOServerWindow : EditorWindow
         EditorPrefs.SetBool("SocketIOServer_AutoRecycle", autoRecycle);
         EditorPrefs.SetFloat("SocketIOServer_IdleTimeout", idleTimeout);
         EditorPrefs.SetBool("SocketIOServer_RunExternally", runServerExternally);
+        EditorPrefs.SetBool("SocketIOServer_MultiCoreCluster", useMultiCoreCluster);
+        EditorPrefs.SetInt("SocketIOServer_ClusterWorkerCount", clusterWorkerCount);
         EditorPrefs.SetInt("SocketIOServer_MainTab", mainTab);
     }
 
@@ -1337,6 +1389,8 @@ public class SocketIOServerWindow : EditorWindow
         autoRecycle = EditorPrefs.GetBool("SocketIOServer_AutoRecycle", true);
         idleTimeout = EditorPrefs.GetFloat("SocketIOServer_IdleTimeout", 0f);
         runServerExternally = EditorPrefs.GetBool("SocketIOServer_RunExternally", false);
+        useMultiCoreCluster = EditorPrefs.GetBool("SocketIOServer_MultiCoreCluster", false);
+        clusterWorkerCount = Mathf.Max(0, EditorPrefs.GetInt("SocketIOServer_ClusterWorkerCount", 0));
         mainTab = Mathf.Clamp(EditorPrefs.GetInt("SocketIOServer_MainTab", 0), 0, MainTabNames.Length - 1);
     }
 

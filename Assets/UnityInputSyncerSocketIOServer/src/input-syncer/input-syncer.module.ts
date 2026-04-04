@@ -8,6 +8,8 @@ import { InputSyncerPoolService } from './pool.service';
 import { MatchGateway } from './match.gateway';
 import { AdminController } from './admin.controller';
 import { BearerAuthGuard } from './admin.guard';
+import { InternalController } from './internal.controller';
+import { InternalSecretGuard } from './internal.guard';
 
 @Module({})
 export class InputSyncerModule {
@@ -23,8 +25,9 @@ export class InputSyncerModule {
         InputSyncerPoolService,
         MatchGateway,
         BearerAuthGuard,
+        InternalSecretGuard,
       ],
-      controllers: [AdminController],
+      controllers: [AdminController, InternalController],
       exports: [InputSyncerPoolService, INPUT_SYNCER_OPTIONS],
     };
   }
@@ -43,8 +46,9 @@ export class InputSyncerModule {
         InputSyncerPoolService,
         MatchGateway,
         BearerAuthGuard,
+        InternalSecretGuard,
       ],
-      controllers: [AdminController],
+      controllers: [AdminController, InternalController],
       exports: [InputSyncerPoolService, INPUT_SYNCER_OPTIONS],
     };
   }
