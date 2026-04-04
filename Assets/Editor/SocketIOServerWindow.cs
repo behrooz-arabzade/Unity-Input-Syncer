@@ -20,6 +20,11 @@ public class SocketIOServerWindow : EditorWindow
     private bool allowLateJoin = false;
     private bool sendHistoryOnLateJoin = true;
     private string adminAuthToken = "";
+    /// <summary>
+    /// When set, admin HTTP polling (stats / instances) uses this root instead of <c>http://localhost:{port}</c>.
+    /// Use for a Socket.IO server running on a remote dev machine (e.g. <c>https://dev.example.com</c> or <c>http://192.168.1.10:3000</c>).
+    /// </summary>
+    private string adminApiBaseUrl = "";
     private int maxInstances = 10;
     private bool autoRecycle = true;
     private float idleTimeout = 0f;
@@ -193,6 +198,10 @@ public class SocketIOServerWindow : EditorWindow
     private Vector2 instancesScroll;
     private string pollError;
 
+    private static readonly string[] MainTabNames = { "Setup", "Monitor", "Console" };
+    private int mainTab;
+    private Vector2 mainTabScroll;
+
     private GUIStyle _sectionPanelStyle;
     private GUIStyle _sectionTitleStyle;
     private GUIStyle _statValueStyle;
@@ -207,7 +216,8 @@ public class SocketIOServerWindow : EditorWindow
     [MenuItem("Window/Input Syncer/Socket.IO Server")]
     public static void ShowWindow()
     {
-        GetWindow<SocketIOServerWindow>("Socket.IO Server");
+        var w = GetWindow<SocketIOServerWindow>("Socket.IO Server");
+        w.minSize = new Vector2(400f, 280f);
     }
 
     private static void PersistConsoleSnapshot(SocketIOServerWindow source)
@@ -320,6 +330,7 @@ public class SocketIOServerWindow : EditorWindow
 
     void OnEnable()
     {
+        minSize = new Vector2(400f, 280f);
         LoadPrefs();
         RestoreConsoleFromSession();
         EditorApplication.update += OnEditorUpdate;
@@ -371,18 +382,40 @@ public class SocketIOServerWindow : EditorWindow
 
     void OnGUI()
     {
-        DrawConfigSection();
-        EditorGUILayout.Space(4);
-        DrawControlSection();
+        EditorGUILayout.Space(2);
+        int prevTab = mainTab;
+        mainTab = GUILayout.Toolbar(mainTab, MainTabNames);
+        if (prevTab != mainTab)
+            SavePrefs();
+
         EditorGUILayout.Space(4);
 
-        if (ShouldPollAdminApi())
+        // Reserve space for tab bar + padding so the body scroll area fits the window.
+        const float chrome = 46f;
+        float bodyHeight = Mathf.Max(100f, position.height - chrome);
+
+        if (mainTab == 2)
         {
-            DrawMonitoringSection();
-            EditorGUILayout.Space(4);
+            DrawConsoleSection(bodyHeight);
+            return;
         }
 
-        DrawConsoleSection();
+        mainTabScroll = EditorGUILayout.BeginScrollView(mainTabScroll, GUILayout.Height(bodyHeight));
+        if (mainTab == 0)
+        {
+            DrawConfigSection();
+            EditorGUILayout.Space(4);
+            DrawControlSection();
+        }
+        else
+        {
+            if (ShouldPollAdminApi())
+                DrawMonitoringSection();
+            else
+                DrawMonitorTabPlaceholder();
+        }
+
+        EditorGUILayout.EndScrollView();
     }
 
     private void DrawConfigSection()
@@ -410,6 +443,24 @@ public class SocketIOServerWindow : EditorWindow
         EditorGUILayout.Space(2);
         GUILayout.Label("Admin", EditorStyles.miniBoldLabel);
         adminAuthToken = EditorGUILayout.TextField("Auth Token", adminAuthToken);
+        EditorGUI.BeginChangeCheck();
+        adminApiBaseUrl = EditorGUILayout.TextField(
+            new GUIContent(
+                "API base URL",
+                "Leave empty to use http://localhost:<Port> (same machine). Set when the server runs elsewhere, e.g. http://dev.myhost:3000 or https://api.staging.example.com — no trailing slash."),
+            adminApiBaseUrl);
+        if (EditorGUI.EndChangeCheck())
+        {
+            latestStats = null;
+            pollError = null;
+            lastPollTime = 0;
+        }
+        using (new EditorGUI.DisabledScope(true))
+        {
+            EditorGUILayout.TextField(
+                "Resolved API root",
+                GetAdminApiRoot());
+        }
 
         GUI.enabled = wasEnabled;
         EditorGUI.indentLevel--;
@@ -426,8 +477,8 @@ public class SocketIOServerWindow : EditorWindow
         bool prevExternal = runServerExternally;
         runServerExternally = EditorGUILayout.ToggleLeft(
             new GUIContent(
-                "External server (I run Node in my own terminal — monitor only)",
-                "Unity will not start or stop the process. The window still polls /api/stats and can use Create/Delete instance. Match Port and Auth Token above to your terminal environment."),
+                "External / remote server (monitor only)",
+                "Unity will not start or stop Node. Use when the process runs in your terminal or on a remote dev host. Set API base URL (and Auth Token) to match that server; Port still applies to Unity-started servers and to the default localhost API URL when API base URL is empty."),
             runServerExternally);
         if (prevExternal != runServerExternally)
         {
@@ -504,9 +555,9 @@ public class SocketIOServerWindow : EditorWindow
             return;
 
         EditorGUILayout.HelpBox(
-            "Use the same Port and Auth Token as in Server Configuration above. " +
-            "Client URL is typically http://localhost:<port> (see TicTacToeExample). " +
-            "Optional: set INPUT_SYNCER_EDITOR_LOG to mirror logs into this window’s console (see snippet).",
+            "Use the same Port and Auth Token as on the machine where Node runs (or set API base URL to your remote admin URL and token). " +
+            "Game clients use the Socket.IO URL for that host (e.g. http://localhost:<port> locally, or ws/http to your dev server — see TicTacToeExample). " +
+            "Optional: set INPUT_SYNCER_EDITOR_LOG on the server host to mirror logs into this window’s console (see snippet; only works if that path is readable from your Mac, e.g. SSHFS or local run).",
             MessageType.None);
 
         EditorGUILayout.Space(2);
@@ -539,7 +590,7 @@ public class SocketIOServerWindow : EditorWindow
         sb.AppendLine("# From project folder Assets/UnityInputSyncerSocketIOServer");
         sb.AppendLine($"cd \"{ServerDir}\"");
         sb.AppendLine();
-        sb.AppendLine("# Required / common options (must match Socket.IO Server window):");
+        sb.AppendLine("# Required / common options (should match this window; remote host: set API base URL for monitoring):");
         sb.AppendLine($"export INPUT_SYNCER_PORT={port}");
         sb.AppendLine($"export INPUT_SYNCER_MAX_PLAYERS={maxPlayers}");
         sb.AppendLine($"export INPUT_SYNCER_STEP_INTERVAL={stepInterval.ToString(CultureInfo.InvariantCulture)}");
@@ -614,8 +665,8 @@ public class SocketIOServerWindow : EditorWindow
             EditorGUILayout.BeginHorizontal();
             GUILayout.Space(18);
             EditorGUILayout.LabelField("Address", GUILayout.Width(52));
-            var addr = $"http://localhost:{port}";
-            if (GUILayout.Button(new GUIContent(addr, "Open in browser"), EditorStyles.linkLabel))
+            var addr = GetAdminApiRoot();
+            if (GUILayout.Button(new GUIContent(addr, "Open admin root in browser"), EditorStyles.linkLabel))
                 Application.OpenURL(addr);
             GUILayout.FlexibleSpace();
             EditorGUILayout.EndHorizontal();
@@ -689,6 +740,16 @@ public class SocketIOServerWindow : EditorWindow
         EndSectionPanel();
     }
 
+    private void DrawMonitorTabPlaceholder()
+    {
+        BeginSectionPanel();
+        GUILayout.Label("Monitoring & pool", SectionTitleStyle);
+        EditorGUILayout.HelpBox(
+            "Nothing to poll yet. On the Setup tab, start the server from Unity, or enable “External / remote server” and set API base URL / auth to match a running server.",
+            MessageType.Info);
+        EndSectionPanel();
+    }
+
     private void DrawInstanceTableHeader()
     {
         EditorGUILayout.BeginHorizontal(EditorStyles.toolbar);
@@ -725,7 +786,8 @@ public class SocketIOServerWindow : EditorWindow
         EditorGUILayout.EndHorizontal();
     }
 
-    private void DrawConsoleSection()
+    /// <param name="viewportHeight">Total height for the console panel (header + scroll area).</param>
+    private void DrawConsoleSection(float viewportHeight)
     {
         BeginSectionPanel();
         EditorGUILayout.BeginHorizontal();
@@ -742,7 +804,8 @@ public class SocketIOServerWindow : EditorWindow
         }
         EditorGUILayout.EndHorizontal();
 
-        consoleScroll = EditorGUILayout.BeginScrollView(consoleScroll, GUILayout.Height(140));
+        float scrollH = Mathf.Max(80f, viewportHeight - 52f);
+        consoleScroll = EditorGUILayout.BeginScrollView(consoleScroll, GUILayout.Height(scrollH));
         if (consoleLines.Count > 0)
         {
             lock (consoleLines)
@@ -1138,7 +1201,7 @@ public class SocketIOServerWindow : EditorWindow
         if (EditorApplication.timeSinceStartup - lastPollTime < PollIntervalSeconds) return;
         lastPollTime = EditorApplication.timeSinceStartup;
 
-        string url = $"http://localhost:{port}/api/stats";
+        string url = $"{GetAdminApiRoot()}/api/stats";
         activeStatsRequest = UnityWebRequest.Get(url);
 
         if (!string.IsNullOrEmpty(adminAuthToken))
@@ -1180,7 +1243,7 @@ public class SocketIOServerWindow : EditorWindow
     {
         if (activeActionRequest != null) return;
 
-        string url = $"http://localhost:{port}/api/instances";
+        string url = $"{GetAdminApiRoot()}/api/instances";
         activeActionRequest = new UnityWebRequest(url, "POST");
         activeActionRequest.uploadHandler = new UploadHandlerRaw(Encoding.UTF8.GetBytes("{}"));
         activeActionRequest.downloadHandler = new DownloadHandlerBuffer();
@@ -1197,7 +1260,7 @@ public class SocketIOServerWindow : EditorWindow
     {
         if (activeActionRequest != null) return;
 
-        string url = $"http://localhost:{port}/api/instances/{id}";
+        string url = $"{GetAdminApiRoot()}/api/instances/{id}";
         activeActionRequest = UnityWebRequest.Delete(url);
         activeActionRequest.downloadHandler = new DownloadHandlerBuffer();
 
@@ -1252,10 +1315,12 @@ public class SocketIOServerWindow : EditorWindow
         EditorPrefs.SetBool("SocketIOServer_AllowLateJoin", allowLateJoin);
         EditorPrefs.SetBool("SocketIOServer_SendHistoryOnLateJoin", sendHistoryOnLateJoin);
         EditorPrefs.SetString("SocketIOServer_AdminAuthToken", adminAuthToken);
+        EditorPrefs.SetString("SocketIOServer_AdminApiBaseUrl", adminApiBaseUrl ?? "");
         EditorPrefs.SetInt("SocketIOServer_MaxInstances", maxInstances);
         EditorPrefs.SetBool("SocketIOServer_AutoRecycle", autoRecycle);
         EditorPrefs.SetFloat("SocketIOServer_IdleTimeout", idleTimeout);
         EditorPrefs.SetBool("SocketIOServer_RunExternally", runServerExternally);
+        EditorPrefs.SetInt("SocketIOServer_MainTab", mainTab);
     }
 
     private void LoadPrefs()
@@ -1267,15 +1332,32 @@ public class SocketIOServerWindow : EditorWindow
         allowLateJoin = EditorPrefs.GetBool("SocketIOServer_AllowLateJoin", false);
         sendHistoryOnLateJoin = EditorPrefs.GetBool("SocketIOServer_SendHistoryOnLateJoin", true);
         adminAuthToken = EditorPrefs.GetString("SocketIOServer_AdminAuthToken", "");
+        adminApiBaseUrl = EditorPrefs.GetString("SocketIOServer_AdminApiBaseUrl", "");
         maxInstances = EditorPrefs.GetInt("SocketIOServer_MaxInstances", 10);
         autoRecycle = EditorPrefs.GetBool("SocketIOServer_AutoRecycle", true);
         idleTimeout = EditorPrefs.GetFloat("SocketIOServer_IdleTimeout", 0f);
         runServerExternally = EditorPrefs.GetBool("SocketIOServer_RunExternally", false);
+        mainTab = Mathf.Clamp(EditorPrefs.GetInt("SocketIOServer_MainTab", 0), 0, MainTabNames.Length - 1);
     }
 
     // -------------------------
     // HELPERS
     // -------------------------
+
+    /// <summary>Root URL for admin HTTP (stats, instance CRUD). No trailing slash.</summary>
+    private string GetAdminApiRoot()
+    {
+        var s = adminApiBaseUrl?.Trim() ?? "";
+        if (string.IsNullOrEmpty(s))
+            return $"http://localhost:{port}";
+
+        s = s.TrimEnd('/');
+        if (!s.StartsWith("http://", StringComparison.OrdinalIgnoreCase) &&
+            !s.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+            s = "http://" + s;
+
+        return s;
+    }
 
     private GUIStyle SectionPanelStyle
     {
