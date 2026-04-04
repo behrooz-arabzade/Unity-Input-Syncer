@@ -54,6 +54,13 @@ namespace UnityInputSyncerClient.Examples.TicTacToe
 
         private string statusMessage = "";
 
+        void Awake()
+        {
+            // Default is false: Unity pauses FixedUpdate/Update (and Socket.IO's Update-scoped
+            // callbacks) when the window loses focus, so the board stops updating until foreground.
+            Application.runInBackground = true;
+        }
+
         void FixedUpdate()
         {
             if (syncerState == null)
