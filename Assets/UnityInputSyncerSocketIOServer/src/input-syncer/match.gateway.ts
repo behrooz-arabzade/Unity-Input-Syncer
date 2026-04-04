@@ -4,6 +4,7 @@ import {
   SubscribeMessage,
   OnGatewayConnection,
   OnGatewayDisconnect,
+  OnGatewayInit,
   MessageBody,
   ConnectedSocket,
 } from '@nestjs/websockets';
@@ -50,7 +51,9 @@ function logGatewayError(
   transports: ['websocket'],
   cors: { origin: '*' },
 })
-export class MatchGateway implements OnGatewayConnection, OnGatewayDisconnect {
+export class MatchGateway
+  implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect
+{
   private readonly logger = new Logger(MatchGateway.name);
 
   /** socketId -> instanceId */
@@ -60,6 +63,63 @@ export class MatchGateway implements OnGatewayConnection, OnGatewayDisconnect {
   server!: Server;
 
   constructor(private readonly pool: InputSyncerPoolService) {}
+
+  afterInit(_server: Server): void {
+    this.pool.registerBeforeInstanceDestroyedHandler((instanceId) =>
+      this.disconnectClientsForDestroyedInstance(instanceId),
+    );
+  }
+
+  /**
+   * When an instance is removed from the pool, connected sockets must be closed;
+   * otherwise clients stay "connected" while the match no longer exists.
+   */
+  private disconnectClientsForDestroyedInstance(instanceId: string): void {
+    const socketIds = [...this.socketToInstance.entries()]
+      .filter(([, id]) => id === instanceId)
+      .map(([sid]) => sid);
+
+    if (socketIds.length === 0) return;
+
+    const ns = this.server?.sockets;
+    if (!ns) {
+      this.logger.warn(
+        `Cannot emit/disconnect for instance ${instanceId}: gateway server not ready — clearing stale socket map entries`,
+      );
+      for (const socketId of socketIds) {
+        this.socketToInstance.delete(socketId);
+      }
+      return;
+    }
+
+    const payload = {
+      reason: 'instance-destroyed',
+      message: 'This match instance was closed by the server',
+    };
+
+    for (const socketId of socketIds) {
+      const socket = ns.sockets.get(socketId);
+      if (socket?.connected) {
+        try {
+          socket.emit(InputSyncerEvents.INPUT_SYNCER_CONTENT_ERROR, payload);
+        } catch (e) {
+          logGatewayError(
+            this.logger,
+            'disconnectClientsForDestroyedInstance emit',
+            socketId,
+            e,
+          );
+        }
+        socket.disconnect(true);
+      } else {
+        this.socketToInstance.delete(socketId);
+      }
+    }
+
+    this.logger.log(
+      `Closed ${socketIds.length} socket(s) for destroyed instance ${instanceId}`,
+    );
+  }
 
   handleConnection(socket: Socket): void {
     try {

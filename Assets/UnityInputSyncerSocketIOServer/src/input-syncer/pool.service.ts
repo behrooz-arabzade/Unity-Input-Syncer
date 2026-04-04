@@ -17,6 +17,15 @@ export class InputSyncerPoolService implements OnModuleDestroy {
   private tickInterval: ReturnType<typeof setInterval> | null = null;
   private disposed = false;
 
+  /** Called before removing an instance so transports (e.g. Socket.IO) can close client connections. */
+  private beforeInstanceDestroyed: ((instanceId: string) => void) | undefined;
+
+  registerBeforeInstanceDestroyedHandler(
+    handler: (instanceId: string) => void,
+  ): void {
+    this.beforeInstanceDestroyed = handler;
+  }
+
   private readonly maxInstances: number;
   private readonly autoRecycleOnFinish: boolean;
   private readonly idleTimeoutSeconds: number;
@@ -158,6 +167,7 @@ export class InputSyncerPoolService implements OnModuleDestroy {
   }
 
   private destroyInstanceInternal(instance: ServerInstance): void {
+    this.beforeInstanceDestroyed?.(instance.id);
     instance.onStateChanged = () => {};
     this.instances.delete(instance.id);
     instance.server.dispose();
@@ -178,6 +188,7 @@ export class InputSyncerPoolService implements OnModuleDestroy {
     }
 
     for (const instance of this.instances.values()) {
+      this.beforeInstanceDestroyed?.(instance.id);
       instance.onStateChanged = () => {};
       instance.server.dispose();
     }
