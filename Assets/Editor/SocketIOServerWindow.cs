@@ -431,7 +431,11 @@ public class SocketIOServerWindow : EditorWindow
         bool wasEnabled = GUI.enabled;
         GUI.enabled = !IsManagedServerRunning() && !isBuilding && !isInstalling;
 
-        port = (ushort)EditorGUILayout.IntField("Port", port);
+        port = (ushort)EditorGUILayout.IntField(
+            new GUIContent(
+                "Port",
+                "Public HTTP/Socket.IO port. Game clients always use this URL root for every match instance; matchId selects which instance. Not a different port per instance."),
+            port);
         maxPlayers = EditorGUILayout.IntField("Max Players", maxPlayers);
         stepInterval = EditorGUILayout.FloatField("Step Interval (s)", stepInterval);
         autoStartWhenFull = EditorGUILayout.Toggle("Auto Start When Full", autoStartWhenFull);
@@ -450,7 +454,7 @@ public class SocketIOServerWindow : EditorWindow
         useMultiCoreCluster = EditorGUILayout.ToggleLeft(
             new GUIContent(
                 "Multi-core cluster (single machine)",
-                "Spawns multiple worker processes (each with its own match pool on 127.0.0.1) and a primary on the Port below. Internal worker ports default to Port+1, Port+2, … Requires npm run build; entry is dist/cluster-primary.js."),
+                "Spawns worker processes (each with its own match pool on 127.0.0.1) and a primary on Port. Clients still connect only to Port; Port+1, … are internal. Requires npm run build; entry is dist/cluster-primary.js."),
             useMultiCoreCluster);
         if (useMultiCoreCluster)
         {
@@ -741,6 +745,19 @@ public class SocketIOServerWindow : EditorWindow
         EditorGUI.ProgressBar(barRect, usedFrac,
             $"{latestStats.totalInstances} / {capacity} instances · {latestStats.availableSlots} slots free");
 
+        EditorGUILayout.Space(6);
+        {
+            string root = GetAdminApiRoot();
+            string clusterNote = useMultiCoreCluster
+                ? " Multi-core: extra processes listen on localhost-only ports (Port+1, …); game builds must not use those—only this URL."
+                : "";
+            EditorGUILayout.HelpBox(
+                "Clients connect every match to the same Socket.IO server URL—there is no separate port per instance. " +
+                $"Use this root as the client “Server URL” (e.g. TicTacToe): {root}. Pass the instance ID from the table as matchId when connecting." +
+                clusterNote,
+                MessageType.Info);
+        }
+
         EditorGUILayout.Space(8);
         EditorGUILayout.LabelField("Instance states", EditorStyles.miniBoldLabel);
         EditorGUILayout.BeginHorizontal();
@@ -814,7 +831,8 @@ public class SocketIOServerWindow : EditorWindow
         EditorGUILayout.BeginHorizontal();
         string shortId = inst.id.Length > 8 ? inst.id.Substring(0, 8) : inst.id;
         string displayId = inst.id.Length > 8 ? shortId + "…" : shortId;
-        var idTooltip = $"Match / instance ID:\n{inst.id}\n\nUse this value as matchId in the client connection URL/query.";
+        var idTooltip =
+            $"Instance ID (matchId):\n{inst.id}\n\nUse the same Socket.IO server URL/port for all instances; pass this id as matchId (not a different port).";
         GUILayout.Label(new GUIContent(displayId, idTooltip), EditorStyles.miniLabel, GUILayout.Width(80));
         GUILayout.Label(inst.state, EditorStyles.miniLabel, GUILayout.Width(100));
         GUILayout.Label(inst.playerCount.ToString(), EditorStyles.miniLabel, GUILayout.Width(55));
@@ -824,7 +842,7 @@ public class SocketIOServerWindow : EditorWindow
         if (GUILayout.Button("Copy", EditorStyles.miniButton, GUILayout.Width(44)))
         {
             EditorGUIUtility.systemCopyBuffer = inst.id;
-            ShowNotification(new GUIContent("Copied match ID to clipboard (use as matchId when connecting)."));
+            ShowNotification(new GUIContent("Copied instance ID—paste as matchId; server URL/port is unchanged for every instance."));
         }
         if (GUILayout.Button("Delete", EditorStyles.miniButton, GUILayout.Width(50)))
             DeleteInstance(inst.id);
