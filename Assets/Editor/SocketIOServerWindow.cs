@@ -25,6 +25,12 @@ public class SocketIOServerWindow : EditorWindow
     private float idleTimeout = 0f;
 
     private bool showConfig = true;
+    /// <summary>
+    /// When true, Unity does not spawn Node; you run the server in your own terminal and this window
+    /// still polls the admin HTTP API (and optionally tails INPUT_SYNCER_EDITOR_LOG if present).
+    /// </summary>
+    private bool runServerExternally;
+    private bool showExternalTerminalTips = true;
 
     // -------------------------
     // Process state
@@ -256,8 +262,15 @@ public class SocketIOServerWindow : EditorWindow
 
     private void PollEditorServerLogTail()
     {
-        if (s_stdioRedirectActive || !IsServerRunning()) return;
+        bool managed = IsManagedServerRunning();
+        if (managed && s_stdioRedirectActive)
+            return;
+        if (!managed && !runServerExternally)
+            return;
+
         var path = EditorPrefs.GetString(EditorLogPathPrefKey, "");
+        if (string.IsNullOrEmpty(path))
+            path = Path.Combine(ServerDir, ".unity-editor-server-console.log");
         if (string.IsNullOrEmpty(path) || !File.Exists(path)) return;
         if (EditorApplication.timeSinceStartup - s_lastEditorLogPollTime < 0.12)
             return;
@@ -363,7 +376,7 @@ public class SocketIOServerWindow : EditorWindow
         DrawControlSection();
         EditorGUILayout.Space(4);
 
-        if (IsServerRunning())
+        if (ShouldPollAdminApi())
         {
             DrawMonitoringSection();
             EditorGUILayout.Space(4);
@@ -379,7 +392,7 @@ public class SocketIOServerWindow : EditorWindow
 
         EditorGUI.indentLevel++;
         bool wasEnabled = GUI.enabled;
-        GUI.enabled = !IsServerRunning() && !isBuilding && !isInstalling;
+        GUI.enabled = !IsManagedServerRunning() && !isBuilding && !isInstalling;
 
         port = (ushort)EditorGUILayout.IntField("Port", port);
         maxPlayers = EditorGUILayout.IntField("Max Players", maxPlayers);
@@ -407,6 +420,32 @@ public class SocketIOServerWindow : EditorWindow
         BeginSectionPanel();
         GUILayout.Label("Server Control", SectionTitleStyle);
 
+        EditorGUILayout.Space(2);
+        bool managedRunning = IsManagedServerRunning();
+        EditorGUI.BeginDisabledGroup(managedRunning);
+        bool prevExternal = runServerExternally;
+        runServerExternally = EditorGUILayout.ToggleLeft(
+            new GUIContent(
+                "External server (I run Node in my own terminal — monitor only)",
+                "Unity will not start or stop the process. The window still polls /api/stats and can use Create/Delete instance. Match Port and Auth Token above to your terminal environment."),
+            runServerExternally);
+        if (prevExternal != runServerExternally)
+        {
+            SavePrefs();
+            latestStats = null;
+            pollError = null;
+            lastPollTime = 0;
+        }
+        EditorGUI.EndDisabledGroup();
+        if (managedRunning)
+            EditorGUILayout.HelpBox("Stop the Unity-started server before switching to external mode.", MessageType.Info);
+
+        if (runServerExternally)
+        {
+            EditorGUILayout.Space(4);
+            DrawExternalTerminalTipsSection();
+        }
+
         bool hasNodeModules = Directory.Exists(Path.Combine(ServerDir, "node_modules"));
         bool hasDist = Directory.Exists(Path.Combine(ServerDir, "dist"));
 
@@ -417,7 +456,7 @@ public class SocketIOServerWindow : EditorWindow
 
         EditorGUILayout.BeginHorizontal();
 
-        bool canRunTooling = !IsServerRunning() && !isBuilding && !isInstalling;
+        bool canRunTooling = !managedRunning && !isBuilding && !isInstalling;
 
         GUI.enabled = canRunTooling;
         if (GUILayout.Button("Install Dependencies", GUILayout.Width(150)))
@@ -427,26 +466,104 @@ public class SocketIOServerWindow : EditorWindow
         if (GUILayout.Button("Build", GUILayout.Width(60)))
             StartBuild();
 
-        if (!IsServerRunning())
+        if (!runServerExternally)
         {
-            GUI.enabled = canRunTooling && hasNodeModules && hasDist;
-            if (GUILayout.Button("Start Server"))
-                StartServer();
+            if (!managedRunning)
+            {
+                GUI.enabled = canRunTooling && hasNodeModules && hasDist;
+                if (GUILayout.Button("Start Server"))
+                    StartServer();
+            }
+            else
+            {
+                GUI.enabled = true;
+                if (GUILayout.Button("Stop Server"))
+                    StopServer();
+            }
         }
         else
         {
-            GUI.enabled = true;
-            if (GUILayout.Button("Stop Server"))
-                StopServer();
+            GUILayout.FlexibleSpace();
         }
         GUI.enabled = true;
 
         EditorGUILayout.EndHorizontal();
+        if (runServerExternally)
+            EditorGUILayout.HelpBox("Use Install / Build here if needed, then run Node from your terminal using the snippet below.", MessageType.None);
 
         EditorGUILayout.Space(6);
         DrawServerStatusRow();
 
         EndSectionPanel();
+    }
+
+    private void DrawExternalTerminalTipsSection()
+    {
+        showExternalTerminalTips = EditorGUILayout.Foldout(showExternalTerminalTips, "How to start the server in a terminal", true);
+        if (!showExternalTerminalTips)
+            return;
+
+        EditorGUILayout.HelpBox(
+            "Use the same Port and Auth Token as in Server Configuration above. " +
+            "Client URL is typically http://localhost:<port> (see TicTacToeExample). " +
+            "Optional: set INPUT_SYNCER_EDITOR_LOG to mirror logs into this window’s console (see snippet).",
+            MessageType.None);
+
+        EditorGUILayout.Space(2);
+        EditorGUILayout.BeginHorizontal();
+        if (GUILayout.Button("Copy zsh/bash commands", GUILayout.Width(180)))
+        {
+            EditorGUIUtility.systemCopyBuffer = BuildExternalServerShellSnippet();
+            ShowNotification(new GUIContent("Copied shell snippet to clipboard."));
+        }
+        if (GUILayout.Button("Reveal server folder", GUILayout.Width(140)))
+            EditorUtility.RevealInFinder(ServerDir);
+        EditorGUILayout.EndHorizontal();
+
+        string snippetPreview = BuildExternalServerShellSnippet();
+        var previewStyle = new GUIStyle(EditorStyles.textArea)
+        {
+            wordWrap = true,
+            fontSize = EditorStyles.miniLabel.fontSize
+        };
+        EditorGUI.BeginDisabledGroup(true);
+        EditorGUILayout.TextArea(snippetPreview, previewStyle, GUILayout.MinHeight(120));
+        EditorGUI.EndDisabledGroup();
+    }
+
+    /// <summary>Export lines for zsh/bash; matches env vars used when Unity starts the server.</summary>
+    private string BuildExternalServerShellSnippet()
+    {
+        string logPath = Path.Combine(ServerDir, ".unity-editor-server-console.log");
+        var sb = new StringBuilder();
+        sb.AppendLine("# From project folder Assets/UnityInputSyncerSocketIOServer");
+        sb.AppendLine($"cd \"{ServerDir}\"");
+        sb.AppendLine();
+        sb.AppendLine("# Required / common options (must match Socket.IO Server window):");
+        sb.AppendLine($"export INPUT_SYNCER_PORT={port}");
+        sb.AppendLine($"export INPUT_SYNCER_MAX_PLAYERS={maxPlayers}");
+        sb.AppendLine($"export INPUT_SYNCER_STEP_INTERVAL={stepInterval.ToString(CultureInfo.InvariantCulture)}");
+        sb.AppendLine($"export INPUT_SYNCER_AUTO_START_WHEN_FULL={(autoStartWhenFull ? "true" : "false")}");
+        sb.AppendLine($"export INPUT_SYNCER_ALLOW_LATE_JOIN={(allowLateJoin ? "true" : "false")}");
+        sb.AppendLine($"export INPUT_SYNCER_SEND_HISTORY_ON_LATE_JOIN={(sendHistoryOnLateJoin ? "true" : "false")}");
+        sb.AppendLine($"export INPUT_SYNCER_MAX_INSTANCES={maxInstances}");
+        sb.AppendLine($"export INPUT_SYNCER_AUTO_RECYCLE={(autoRecycle ? "true" : "false")}");
+        sb.AppendLine($"export INPUT_SYNCER_IDLE_TIMEOUT={idleTimeout.ToString(CultureInfo.InvariantCulture)}");
+        if (!string.IsNullOrEmpty(adminAuthToken))
+            sb.AppendLine($"export INPUT_SYNCER_ADMIN_AUTH_TOKEN=\"{adminAuthToken.Replace("\"", "\\\"")}\"");
+        else
+            sb.AppendLine("# export INPUT_SYNCER_ADMIN_AUTH_TOKEN=\"your-token\"  # if you use admin auth");
+        sb.AppendLine();
+        sb.AppendLine("# Optional: append server logs to the Unity window console (this file):");
+        sb.AppendLine($"export INPUT_SYNCER_EDITOR_LOG=\"{logPath}\"");
+        sb.AppendLine();
+        sb.AppendLine("# After: npm install && npm run build");
+        sb.AppendLine("npm run start:prod");
+        sb.AppendLine();
+        sb.AppendLine("# Dev (rebuild on change): npm run start:dev");
+        sb.AppendLine();
+        sb.AppendLine("# Windows (cmd): use set VAR=value then node dist\\main.js or npm run start:prod");
+        return sb.ToString();
     }
 
     private void DrawServerStatusRow()
@@ -463,10 +580,20 @@ public class SocketIOServerWindow : EditorWindow
             statusText = "Building…";
             dotColor = new Color(0.95f, 0.75f, 0.35f);
         }
-        else if (IsServerRunning())
+        else if (IsManagedServerRunning())
         {
-            statusText = "Running";
+            statusText = "Running (Unity process)";
             dotColor = new Color(0.35f, 0.82f, 0.45f);
+        }
+        else if (runServerExternally)
+        {
+            bool reachable = latestStats != null && string.IsNullOrEmpty(pollError);
+            statusText = reachable
+                ? "Monitoring external server (API OK)"
+                : "Monitoring external server (waiting for API…)";
+            dotColor = reachable
+                ? new Color(0.35f, 0.82f, 0.45f)
+                : new Color(0.95f, 0.75f, 0.35f);
         }
         else
         {
@@ -482,7 +609,7 @@ public class SocketIOServerWindow : EditorWindow
         GUILayout.FlexibleSpace();
         EditorGUILayout.EndHorizontal();
 
-        if (IsServerRunning())
+        if (IsManagedServerRunning() || runServerExternally)
         {
             EditorGUILayout.BeginHorizontal();
             GUILayout.Space(18);
@@ -795,7 +922,7 @@ public class SocketIOServerWindow : EditorWindow
 
     private void StartServer()
     {
-        if (IsServerRunning() || isBuilding || isInstalling) return;
+        if (runServerExternally || IsManagedServerRunning() || isBuilding || isInstalling) return;
 
         SavePrefs();
         AppendConsole($"[Editor] Starting server on port {port}...");
@@ -927,7 +1054,8 @@ public class SocketIOServerWindow : EditorWindow
         }
     }
 
-    private bool IsServerRunning()
+    /// <summary>True when Unity spawned the Node process and it is still alive.</summary>
+    private bool IsManagedServerRunning()
     {
         TryReattachToStoredServerProcess();
         if (s_sharedServerProcess == null)
@@ -966,6 +1094,12 @@ public class SocketIOServerWindow : EditorWindow
         }
     }
 
+    /// <summary>Whether admin HTTP polling (stats / instances) should run.</summary>
+    private bool ShouldPollAdminApi()
+    {
+        return IsManagedServerRunning() || runServerExternally;
+    }
+
     private static void AppendConsoleToAllOpenWindows(string line)
     {
         var windows = Resources.FindObjectsOfTypeAll<SocketIOServerWindow>();
@@ -998,7 +1132,7 @@ public class SocketIOServerWindow : EditorWindow
 
     private void PollStats()
     {
-        if (!IsServerRunning()) return;
+        if (!ShouldPollAdminApi()) return;
         if (activeStatsRequest != null) return;
 
         if (EditorApplication.timeSinceStartup - lastPollTime < PollIntervalSeconds) return;
@@ -1121,6 +1255,7 @@ public class SocketIOServerWindow : EditorWindow
         EditorPrefs.SetInt("SocketIOServer_MaxInstances", maxInstances);
         EditorPrefs.SetBool("SocketIOServer_AutoRecycle", autoRecycle);
         EditorPrefs.SetFloat("SocketIOServer_IdleTimeout", idleTimeout);
+        EditorPrefs.SetBool("SocketIOServer_RunExternally", runServerExternally);
     }
 
     private void LoadPrefs()
@@ -1135,6 +1270,7 @@ public class SocketIOServerWindow : EditorWindow
         maxInstances = EditorPrefs.GetInt("SocketIOServer_MaxInstances", 10);
         autoRecycle = EditorPrefs.GetBool("SocketIOServer_AutoRecycle", true);
         idleTimeout = EditorPrefs.GetFloat("SocketIOServer_IdleTimeout", 0f);
+        runServerExternally = EditorPrefs.GetBool("SocketIOServer_RunExternally", false);
     }
 
     // -------------------------

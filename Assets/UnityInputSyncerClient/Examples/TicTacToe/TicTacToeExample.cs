@@ -262,15 +262,20 @@ namespace UnityInputSyncerClient.Examples.TicTacToe
                 state = GameState.WaitingForReady;
             };
 
-            client.OnError = msg => statusMessage = $"Error: {msg}";
+            client.OnError = msg => {
+                Debug.Log($"Error: {msg}");
+                statusMessage = $"Error: {msg}";
+            };
             client.OnDisconnected = reason =>
             {
                 statusMessage = $"Disconnected: {reason}";
+                Debug.Log($"Disconnected: {reason}");
                 if (state != GameState.GameOver)
                     ResetToMenu();
             };
 
             bool connected = await client.ConnectAsync();
+            Debug.Log($"Connected: {connected}");
             if (connected)
             {
                 client.JoinMatch(userId);
