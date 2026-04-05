@@ -638,6 +638,29 @@ namespace Tests.EditMode
         }
 
         // =========================================================
+        // Max instance lifetime
+        // =========================================================
+
+        [Test]
+        public void MaxInstanceLifetime_Disabled_DoesNotDestroy()
+        {
+            CreatePool(new InputSyncerServerPoolOptions { MaxInstanceLifetimeSeconds = 0f });
+            pool.CreateInstance();
+            pool.Tick();
+            Assert.AreEqual(1, pool.GetInstanceCount());
+        }
+
+        [Test]
+        public void MaxInstanceLifetime_DestroysAfterAge()
+        {
+            CreatePool(new InputSyncerServerPoolOptions { MaxInstanceLifetimeSeconds = 0.001f });
+            pool.CreateInstance();
+            System.Threading.Thread.Sleep(15);
+            pool.Tick();
+            Assert.AreEqual(0, pool.GetInstanceCount());
+        }
+
+        // =========================================================
         // Integration
         // =========================================================
 

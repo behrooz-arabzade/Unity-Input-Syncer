@@ -26,6 +26,10 @@ namespace Tests.EditMode
             Environment.SetEnvironmentVariable("INPUT_SYNCER_ALLOW_LATE_JOIN", null);
             Environment.SetEnvironmentVariable("INPUT_SYNCER_SEND_HISTORY_ON_LATE_JOIN", null);
             Environment.SetEnvironmentVariable("INPUT_SYNCER_HEARTBEAT_TIMEOUT", null);
+            Environment.SetEnvironmentVariable("INPUT_SYNCER_IDLE_TIMEOUT", null);
+            Environment.SetEnvironmentVariable("INPUT_SYNCER_MAX_INSTANCE_LIFETIME", null);
+            Environment.SetEnvironmentVariable("INPUT_SYNCER_ABANDON_MATCH_TIMEOUT", null);
+            Environment.SetEnvironmentVariable("INPUT_SYNCER_QUORUM_USER_FINISH_ENDS_MATCH", null);
         }
 
         [Test]
@@ -49,6 +53,10 @@ namespace Tests.EditMode
                 Assert.IsFalse(bootstrap.ConfigAllowLateJoin);
                 Assert.IsTrue(bootstrap.ConfigSendStepHistoryOnLateJoin);
                 Assert.AreEqual(15f, bootstrap.ConfigHeartbeatTimeout, 0.001f);
+                Assert.AreEqual(0f, bootstrap.ConfigIdleTimeoutSeconds, 0.001f);
+                Assert.AreEqual(0f, bootstrap.ConfigMaxInstanceLifetimeSeconds, 0.001f);
+                Assert.AreEqual(0f, bootstrap.ConfigAbandonMatchTimeoutSeconds, 0.001f);
+                Assert.IsTrue(bootstrap.ConfigQuorumUserFinishEndsMatch);
 
                 UnityEngine.Object.DestroyImmediate(go);
             }
@@ -75,6 +83,10 @@ namespace Tests.EditMode
                 Environment.SetEnvironmentVariable("INPUT_SYNCER_ALLOW_LATE_JOIN", "true");
                 Environment.SetEnvironmentVariable("INPUT_SYNCER_SEND_HISTORY_ON_LATE_JOIN", "false");
                 Environment.SetEnvironmentVariable("INPUT_SYNCER_HEARTBEAT_TIMEOUT", "60");
+                Environment.SetEnvironmentVariable("INPUT_SYNCER_IDLE_TIMEOUT", "120");
+                Environment.SetEnvironmentVariable("INPUT_SYNCER_MAX_INSTANCE_LIFETIME", "3600");
+                Environment.SetEnvironmentVariable("INPUT_SYNCER_ABANDON_MATCH_TIMEOUT", "90");
+                Environment.SetEnvironmentVariable("INPUT_SYNCER_QUORUM_USER_FINISH_ENDS_MATCH", "false");
 
                 var go = new GameObject();
                 var bootstrap = go.AddComponent<MultiInstanceServerBootstrap>();
@@ -91,6 +103,10 @@ namespace Tests.EditMode
                 Assert.IsTrue(bootstrap.ConfigAllowLateJoin);
                 Assert.IsFalse(bootstrap.ConfigSendStepHistoryOnLateJoin);
                 Assert.AreEqual(60f, bootstrap.ConfigHeartbeatTimeout, 0.001f);
+                Assert.AreEqual(120f, bootstrap.ConfigIdleTimeoutSeconds, 0.001f);
+                Assert.AreEqual(3600f, bootstrap.ConfigMaxInstanceLifetimeSeconds, 0.001f);
+                Assert.AreEqual(90f, bootstrap.ConfigAbandonMatchTimeoutSeconds, 0.001f);
+                Assert.IsFalse(bootstrap.ConfigQuorumUserFinishEndsMatch);
 
                 UnityEngine.Object.DestroyImmediate(go);
             }

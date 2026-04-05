@@ -1,4 +1,9 @@
 import { InjectionToken, ModuleMetadata, OptionalFactoryDependency } from '@nestjs/common';
+import {
+  RewardMatchHookPayload,
+  RewardOutcomeDeliveryMode,
+  RewardPerUserHookPayload,
+} from './reward-delivery';
 
 export interface InputSyncerServerOptions {
   maxPlayers?: number;
@@ -6,12 +11,22 @@ export interface InputSyncerServerOptions {
   stepIntervalSeconds?: number;
   allowLateJoin?: boolean;
   sendStepHistoryOnLateJoin?: boolean;
+  quorumUserFinishEndsMatch?: boolean;
+  sessionFinishMaxPayloadBytes?: number;
+  sessionFinishBroadcast?: boolean;
+  rejectInputAfterSessionFinish?: boolean;
+  abandonMatchTimeoutSeconds?: number;
+  matchInstanceId?: string;
+  rewardOutcomeDelivery?: RewardOutcomeDeliveryMode;
+  onRewardHookPerUser?: (payload: RewardPerUserHookPayload) => void;
+  onRewardHookMatch?: (payload: RewardMatchHookPayload) => void;
 }
 
 export interface InputSyncerPoolOptions {
   maxInstances?: number;
   autoRecycleOnFinish?: boolean;
   idleTimeoutSeconds?: number;
+  maxInstanceLifetimeSeconds?: number;
 }
 
 export interface InputSyncerAdminOptions {

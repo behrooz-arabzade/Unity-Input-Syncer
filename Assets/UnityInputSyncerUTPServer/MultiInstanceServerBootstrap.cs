@@ -21,6 +21,9 @@ namespace UnityInputSyncerUTPServer
         [SerializeField] private bool sendStepHistoryOnLateJoin = true;
         [SerializeField] private float heartbeatTimeout = 15f;
         [SerializeField] private float idleTimeoutSeconds = 0f;
+        [SerializeField] private float maxInstanceLifetimeSeconds;
+        [SerializeField] private float abandonMatchTimeoutSeconds;
+        [SerializeField] private bool quorumUserFinishEndsMatch = true;
 
         private InputSyncerServerPool pool;
         private AdminHttpServer httpServer;
@@ -41,6 +44,9 @@ namespace UnityInputSyncerUTPServer
         internal bool ConfigSendStepHistoryOnLateJoin => sendStepHistoryOnLateJoin;
         internal float ConfigHeartbeatTimeout => heartbeatTimeout;
         internal float ConfigIdleTimeoutSeconds => idleTimeoutSeconds;
+        internal float ConfigMaxInstanceLifetimeSeconds => maxInstanceLifetimeSeconds;
+        internal float ConfigAbandonMatchTimeoutSeconds => abandonMatchTimeoutSeconds;
+        internal bool ConfigQuorumUserFinishEndsMatch => quorumUserFinishEndsMatch;
 
         void Awake()
         {
@@ -62,6 +68,7 @@ namespace UnityInputSyncerUTPServer
                 MaxInstances = maxInstances,
                 AutoRecycleOnFinish = autoRecycleOnFinish,
                 IdleTimeoutSeconds = idleTimeoutSeconds,
+                MaxInstanceLifetimeSeconds = maxInstanceLifetimeSeconds,
                 DefaultServerOptions = new InputSyncerServerOptions
                 {
                     MaxPlayers = maxPlayers,
@@ -70,6 +77,8 @@ namespace UnityInputSyncerUTPServer
                     AllowLateJoin = allowLateJoin,
                     SendStepHistoryOnLateJoin = sendStepHistoryOnLateJoin,
                     HeartbeatTimeout = heartbeatTimeout,
+                    AbandonMatchTimeoutSeconds = abandonMatchTimeoutSeconds,
+                    QuorumUserFinishEndsMatch = quorumUserFinishEndsMatch,
                 },
             };
 
@@ -128,6 +137,15 @@ namespace UnityInputSyncerUTPServer
 
             if (DedicatedServerBootstrap.TryGetEnvFloat("INPUT_SYNCER_IDLE_TIMEOUT", out var envIdleTimeout))
                 idleTimeoutSeconds = envIdleTimeout;
+
+            if (DedicatedServerBootstrap.TryGetEnvFloat("INPUT_SYNCER_MAX_INSTANCE_LIFETIME", out var envMaxLife))
+                maxInstanceLifetimeSeconds = envMaxLife;
+
+            if (DedicatedServerBootstrap.TryGetEnvFloat("INPUT_SYNCER_ABANDON_MATCH_TIMEOUT", out var envAbandon))
+                abandonMatchTimeoutSeconds = envAbandon;
+
+            if (DedicatedServerBootstrap.TryGetEnvBool("INPUT_SYNCER_QUORUM_USER_FINISH_ENDS_MATCH", out var envQuorum))
+                quorumUserFinishEndsMatch = envQuorum;
         }
     }
 }

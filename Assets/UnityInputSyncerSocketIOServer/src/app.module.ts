@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { InputSyncerModule } from './input-syncer';
+import { RewardOutcomeDeliveryMode } from './input-syncer/reward-delivery';
 
 function envBool(name: string, fallback: boolean): boolean {
   const raw = process.env[name];
@@ -21,6 +22,13 @@ function envInt(name: string, fallback: number): number {
   return isNaN(parsed) ? fallback : parsed;
 }
 
+function envRewardMode(): RewardOutcomeDeliveryMode {
+  const v = envInt('INPUT_SYNCER_REWARD_OUTCOME_DELIVERY', 0);
+  if (v === 1) return RewardOutcomeDeliveryMode.ServerHookPerUser;
+  if (v === 2) return RewardOutcomeDeliveryMode.ServerHookMatchOrReferee;
+  return RewardOutcomeDeliveryMode.ClientToAdmin;
+}
+
 @Module({
   imports: [
     InputSyncerModule.forRoot({
@@ -28,6 +36,10 @@ function envInt(name: string, fallback: number): number {
         maxInstances: envInt('INPUT_SYNCER_MAX_INSTANCES', 10),
         autoRecycleOnFinish: envBool('INPUT_SYNCER_AUTO_RECYCLE', true),
         idleTimeoutSeconds: envFloat('INPUT_SYNCER_IDLE_TIMEOUT', 0),
+        maxInstanceLifetimeSeconds: envFloat(
+          'INPUT_SYNCER_MAX_INSTANCE_LIFETIME',
+          0,
+        ),
       },
       defaults: {
         maxPlayers: envInt('INPUT_SYNCER_MAX_PLAYERS', 2),
@@ -38,6 +50,15 @@ function envInt(name: string, fallback: number): number {
           'INPUT_SYNCER_SEND_HISTORY_ON_LATE_JOIN',
           true,
         ),
+        quorumUserFinishEndsMatch: envBool(
+          'INPUT_SYNCER_QUORUM_USER_FINISH_ENDS_MATCH',
+          true,
+        ),
+        abandonMatchTimeoutSeconds: envFloat(
+          'INPUT_SYNCER_ABANDON_MATCH_TIMEOUT',
+          0,
+        ),
+        rewardOutcomeDelivery: envRewardMode(),
       },
       admin: {
         authToken: process.env.INPUT_SYNCER_ADMIN_AUTH_TOKEN ?? '',

@@ -6,5 +6,7 @@ namespace UnityInputSyncerUTPServer
         public int ConnectionId;
         public bool Joined;
         public bool Finished;
+        public bool SessionFinished;
     }
 }
+

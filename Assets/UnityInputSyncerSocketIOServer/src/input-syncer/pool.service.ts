@@ -8,6 +8,7 @@ import {
 } from './interfaces';
 import { ServerInstance } from './server-instance';
 import { ServerInstanceState } from './types';
+import { InputSyncerFinishReasons } from './finish-reasons';
 
 /** Partial overrides must not assign `undefined`, or they would erase pool defaults. */
 function mergeServerOptions(
@@ -15,24 +16,28 @@ function mergeServerOptions(
   override?: InputSyncerServerOptions,
 ): InputSyncerServerOptions {
   if (!override) return { ...defaults };
-  return {
-    ...defaults,
-    ...(override.maxPlayers !== undefined
-      ? { maxPlayers: override.maxPlayers }
-      : {}),
-    ...(override.stepIntervalSeconds !== undefined
-      ? { stepIntervalSeconds: override.stepIntervalSeconds }
-      : {}),
-    ...(override.autoStartWhenFull !== undefined
-      ? { autoStartWhenFull: override.autoStartWhenFull }
-      : {}),
-    ...(override.allowLateJoin !== undefined
-      ? { allowLateJoin: override.allowLateJoin }
-      : {}),
-    ...(override.sendStepHistoryOnLateJoin !== undefined
-      ? { sendStepHistoryOnLateJoin: override.sendStepHistoryOnLateJoin }
-      : {}),
-  };
+  const keys: (keyof InputSyncerServerOptions)[] = [
+    'maxPlayers',
+    'stepIntervalSeconds',
+    'autoStartWhenFull',
+    'allowLateJoin',
+    'sendStepHistoryOnLateJoin',
+    'quorumUserFinishEndsMatch',
+    'sessionFinishMaxPayloadBytes',
+    'sessionFinishBroadcast',
+    'rejectInputAfterSessionFinish',
+    'abandonMatchTimeoutSeconds',
+    'matchInstanceId',
+    'rewardOutcomeDelivery',
+    'onRewardHookPerUser',
+    'onRewardHookMatch',
+  ];
+  const out: InputSyncerServerOptions = { ...defaults };
+  for (const k of keys) {
+    const v = override[k];
+    if (v !== undefined) (out as Record<string, unknown>)[k as string] = v;
+  }
+  return out;
 }
 
 @Injectable()
@@ -55,6 +60,7 @@ export class InputSyncerPoolService implements OnModuleDestroy {
   private readonly maxInstances: number;
   private readonly autoRecycleOnFinish: boolean;
   private readonly idleTimeoutSeconds: number;
+  private readonly maxInstanceLifetimeSeconds: number;
   private readonly defaultServerOptions: InputSyncerServerOptions;
 
   constructor(
@@ -64,6 +70,8 @@ export class InputSyncerPoolService implements OnModuleDestroy {
     this.maxInstances = moduleOptions.pool?.maxInstances ?? 10;
     this.autoRecycleOnFinish = moduleOptions.pool?.autoRecycleOnFinish ?? true;
     this.idleTimeoutSeconds = moduleOptions.pool?.idleTimeoutSeconds ?? 0;
+    this.maxInstanceLifetimeSeconds =
+      moduleOptions.pool?.maxInstanceLifetimeSeconds ?? 0;
     this.defaultServerOptions = moduleOptions.defaults ?? {};
 
     this.tickInterval = setInterval(() => this.tick(), 1000);
@@ -87,13 +95,14 @@ export class InputSyncerPoolService implements OnModuleDestroy {
       );
     }
 
+    const id = uuidv4();
     const serverOptions = mergeServerOptions(
       this.defaultServerOptions,
       overrideOptions,
     );
+    serverOptions.matchInstanceId = id;
 
     const server = new InputSyncerServer(serverOptions);
-    const id = uuidv4();
     const instance = new ServerInstance(id, server);
 
     instance.onStateChanged = (inst, _oldState, newState) => {
@@ -155,8 +164,24 @@ export class InputSyncerPoolService implements OnModuleDestroy {
 
   private tick(): void {
     if (this.disposed) return;
+    this.processMaxInstanceLifetime();
     this.processIdleTimeouts();
     this.processPendingDestroys();
+  }
+
+  private processMaxInstanceLifetime(): void {
+    if (this.maxInstanceLifetimeSeconds <= 0) return;
+
+    const now = Date.now();
+    for (const instance of [...this.instances.values()]) {
+      const age = (now - instance.createdAt.getTime()) / 1000;
+      if (age < this.maxInstanceLifetimeSeconds) continue;
+
+      if (instance.server.isMatchStarted && !instance.server.isMatchFinished) {
+        instance.server.finishMatch(InputSyncerFinishReasons.MaxInstanceLifetime);
+      }
+      this.pendingDestroys.push(instance.id);
+    }
   }
 
   private processIdleTimeouts(): void {

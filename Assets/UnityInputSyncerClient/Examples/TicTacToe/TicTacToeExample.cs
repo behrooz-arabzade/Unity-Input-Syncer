@@ -53,6 +53,7 @@ namespace UnityInputSyncerClient.Examples.TicTacToe
         private string sessionUserId = "";
 
         private string statusMessage = "";
+        private bool sessionFinishSent;
 
         void Awake()
         {
@@ -109,11 +110,31 @@ namespace UnityInputSyncerClient.Examples.TicTacToe
                         board.TryPlaceMove(row, col, player);
 
                         if (board.Result != GameResult.InProgress)
+                        {
                             state = GameState.GameOver;
+                            TrySendPlayerSessionFinish();
+                        }
                     }
                 }
                 nextStepToProcess++;
             }
+        }
+
+        private void TrySendPlayerSessionFinish()
+        {
+            if (sessionFinishSent || client == null)
+                return;
+            sessionFinishSent = true;
+
+            string outcome;
+            if (board.Result == GameResult.Draw)
+                outcome = "draw";
+            else if (board.Result == GameResult.XWins)
+                outcome = mySymbol == CellState.X ? "win" : "lose";
+            else
+                outcome = mySymbol == CellState.O ? "win" : "lose";
+
+            client.SendPlayerSessionFinish(new { result = outcome });
         }
 
         void OnGUI()
@@ -285,6 +306,20 @@ namespace UnityInputSyncerClient.Examples.TicTacToe
                 state = GameState.WaitingForReady;
             };
 
+            client.OnPlayerSessionFinish = (userId, data) =>
+            {
+                if (userId == sessionUserId)
+                    Debug.Log($"player-session-finish ack (self): {data}");
+                else
+                    Debug.Log($"player-session-finish (opponent {userId}): {data}");
+            };
+
+            client.OnMatchFinishedWithReason = reason =>
+            {
+                Debug.Log($"Match finished (server): {reason}");
+                statusMessage = $"Match ended: {reason}";
+            };
+
             client.OnError = msg => {
                 Debug.Log($"Error: {msg}");
                 statusMessage = $"Error: {msg}";
@@ -323,6 +358,7 @@ namespace UnityInputSyncerClient.Examples.TicTacToe
             nextStepToProcess = 0;
             statusMessage = "";
             sessionUserId = "";
+            sessionFinishSent = false;
             state = GameState.Menu;
         }
 

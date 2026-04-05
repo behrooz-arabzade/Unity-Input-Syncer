@@ -17,6 +17,8 @@ namespace UnityInputSyncerUTPServer
         [SerializeField] private bool allowLateJoin = false;
         [SerializeField] private bool sendStepHistoryOnLateJoin = true;
         [SerializeField] private float heartbeatTimeout = 15f;
+        [SerializeField] private float abandonMatchTimeoutSeconds;
+        [SerializeField] private bool quorumUserFinishEndsMatch = true;
 
         private InputSyncerServer server;
 
@@ -52,6 +54,8 @@ namespace UnityInputSyncerUTPServer
                 AllowLateJoin = allowLateJoin,
                 SendStepHistoryOnLateJoin = sendStepHistoryOnLateJoin,
                 HeartbeatTimeout = heartbeatTimeout,
+                AbandonMatchTimeoutSeconds = abandonMatchTimeoutSeconds,
+                QuorumUserFinishEndsMatch = quorumUserFinishEndsMatch,
             };
 
             server = new InputSyncerServer(options);
@@ -85,6 +89,12 @@ namespace UnityInputSyncerUTPServer
 
             if (TryGetEnvFloat("INPUT_SYNCER_HEARTBEAT_TIMEOUT", out var envHeartbeat))
                 heartbeatTimeout = envHeartbeat;
+
+            if (TryGetEnvFloat("INPUT_SYNCER_ABANDON_MATCH_TIMEOUT", out var envAbandon))
+                abandonMatchTimeoutSeconds = envAbandon;
+
+            if (TryGetEnvBool("INPUT_SYNCER_QUORUM_USER_FINISH_ENDS_MATCH", out var envQuorum))
+                quorumUserFinishEndsMatch = envQuorum;
         }
 
         internal static bool TryGetEnvUShort(string name, out ushort value)

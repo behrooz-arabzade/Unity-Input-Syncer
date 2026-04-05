@@ -1,7 +1,13 @@
 import { InputSyncerEvents } from './input-syncer-events';
+import { InputSyncerFinishReasons } from './finish-reasons';
 import { InputSyncerPlayer } from './input-syncer-player';
 import { InputSyncerState } from './input-syncer-state';
 import { InputSyncerServerOptions } from './interfaces';
+import {
+  RewardOutcomeDeliveryMode,
+  type RewardMatchHookPayload,
+  type RewardPerUserHookPayload,
+} from './reward-delivery';
 import { AllStepInputs, StepInputs } from './types';
 
 export type SendToSocketFn = (
@@ -10,43 +16,70 @@ export type SendToSocketFn = (
   data: unknown,
 ) => void;
 
-const DEFAULT_OPTIONS: Required<InputSyncerServerOptions> = {
-  maxPlayers: 2,
-  autoStartWhenFull: false,
-  stepIntervalSeconds: 0.1,
-  allowLateJoin: false,
-  sendStepHistoryOnLateJoin: true,
+type ResolvedServerOptions = {
+  maxPlayers: number;
+  autoStartWhenFull: boolean;
+  stepIntervalSeconds: number;
+  allowLateJoin: boolean;
+  sendStepHistoryOnLateJoin: boolean;
+  quorumUserFinishEndsMatch: boolean;
+  sessionFinishMaxPayloadBytes: number;
+  sessionFinishBroadcast: boolean;
+  rejectInputAfterSessionFinish: boolean;
+  abandonMatchTimeoutSeconds: number;
+  matchInstanceId: string;
+  rewardOutcomeDelivery: RewardOutcomeDeliveryMode;
+  onRewardHookPerUser?: (payload: RewardPerUserHookPayload) => void;
+  onRewardHookMatch?: (payload: RewardMatchHookPayload) => void;
 };
+
+function resolveOptions(o?: InputSyncerServerOptions): ResolvedServerOptions {
+  return {
+    maxPlayers: o?.maxPlayers ?? 2,
+    autoStartWhenFull: o?.autoStartWhenFull ?? false,
+    stepIntervalSeconds: o?.stepIntervalSeconds ?? 0.1,
+    allowLateJoin: o?.allowLateJoin ?? false,
+    sendStepHistoryOnLateJoin: o?.sendStepHistoryOnLateJoin ?? true,
+    quorumUserFinishEndsMatch: o?.quorumUserFinishEndsMatch ?? true,
+    sessionFinishMaxPayloadBytes: o?.sessionFinishMaxPayloadBytes ?? 4096,
+    sessionFinishBroadcast: o?.sessionFinishBroadcast ?? true,
+    rejectInputAfterSessionFinish: o?.rejectInputAfterSessionFinish ?? false,
+    abandonMatchTimeoutSeconds: o?.abandonMatchTimeoutSeconds ?? 0,
+    matchInstanceId: o?.matchInstanceId ?? '',
+    rewardOutcomeDelivery:
+      o?.rewardOutcomeDelivery ?? RewardOutcomeDeliveryMode.ClientToAdmin,
+    onRewardHookPerUser: o?.onRewardHookPerUser,
+    onRewardHookMatch: o?.onRewardHookMatch,
+  };
+}
 
 /**
  * Per-match server logic. This is a plain class — NOT a NestJS provider.
  * One instance is created per match by InputSyncerPoolService.
  */
 export class InputSyncerServer {
-  readonly options: Required<InputSyncerServerOptions>;
+  readonly options: ResolvedServerOptions;
   private readonly state = new InputSyncerState();
   private stepInterval: ReturnType<typeof setInterval> | null = null;
   private disposed = false;
+  private abandonDeadlineMs: number | null = null;
+  lastFinishReason: string = InputSyncerFinishReasons.Completed;
 
-  // Injected by the gateway to actually send data over sockets
   sendToSocket: SendToSocketFn = () => {};
 
-  // Event callbacks for external listeners (pool state machine, custom game logic)
   onPlayerConnected: (player: InputSyncerPlayer) => void = () => {};
   onPlayerDisconnected: (player: InputSyncerPlayer) => void = () => {};
   onPlayerJoined: (player: InputSyncerPlayer) => void = () => {};
   onPlayerFinished: (player: InputSyncerPlayer) => void = () => {};
+  onPlayerSessionFinished: (player: InputSyncerPlayer) => void = () => {};
   onMatchStarted: () => void = () => {};
   onMatchFinished: () => void = () => {};
+  onMatchFinishedWithReason: (reason: string) => void = () => {};
   onStepBroadcast: (step: number, stepInputs: StepInputs) => void = () => {};
 
   constructor(options?: InputSyncerServerOptions) {
-    this.options = { ...DEFAULT_OPTIONS, ...options };
+    this.options = resolveOptions(options);
   }
-
-  // -------------------------
-  // LIFECYCLE
-  // -------------------------
 
   startMatch(): void {
     if (this.state.matchStarted) return;
@@ -59,16 +92,42 @@ export class InputSyncerServer {
 
     this.broadcastToJoined(InputSyncerEvents.INPUT_SYNCER_START_EVENT, {});
     this.onMatchStarted();
+    this.updateAbandonDeadline();
   }
 
-  finishMatch(): void {
+  finishMatch(reason: string = InputSyncerFinishReasons.Completed): void {
     if (!this.state.matchStarted || this.state.matchFinished) return;
 
+    const joinedUserIds = [...this.state.players.values()]
+      .filter((p) => p.joined)
+      .map((p) => p.userId);
+
     this.state.matchFinished = true;
+    this.abandonDeadlineMs = null;
     this.clearStepInterval();
 
-    this.broadcastToJoined(InputSyncerEvents.INPUT_SYNCER_FINISH_EVENT, {});
+    this.lastFinishReason = reason ?? InputSyncerFinishReasons.Completed;
+    this.broadcastToJoined(InputSyncerEvents.INPUT_SYNCER_FINISH_EVENT, {
+      reason: this.lastFinishReason,
+    });
     this.onMatchFinished();
+    this.onMatchFinishedWithReason(this.lastFinishReason);
+
+    if (
+      this.options.rewardOutcomeDelivery ===
+      RewardOutcomeDeliveryMode.ServerHookMatchOrReferee
+    ) {
+      try {
+        const payload: RewardMatchHookPayload = {
+          matchInstanceId: this.options.matchInstanceId,
+          reason: this.lastFinishReason,
+          joinedUserIds,
+        };
+        this.options.onRewardHookMatch?.(payload);
+      } catch (e) {
+        console.warn('[InputSyncerServer] onRewardHookMatch failed', e);
+      }
+    }
   }
 
   dispose(): void {
@@ -80,10 +139,6 @@ export class InputSyncerServer {
     this.state.stepHistory.clear();
     this.state.pendingInputs = [];
   }
-
-  // -------------------------
-  // PLAYER MANAGEMENT
-  // -------------------------
 
   addPlayer(socketId: string): void {
     const player = new InputSyncerPlayer(socketId);
@@ -97,11 +152,8 @@ export class InputSyncerServer {
 
     this.state.players.delete(socketId);
     this.onPlayerDisconnected(player);
+    this.checkMatchAbandonAfterPlayerRemoved();
   }
-
-  // -------------------------
-  // PROTOCOL HANDLERS
-  // -------------------------
 
   handleJoin(socketId: string, data?: Record<string, unknown>): void {
     const player = this.state.players.get(socketId);
@@ -150,6 +202,8 @@ export class InputSyncerServer {
       this.getJoinedPlayerCount() >= this.options.maxPlayers
     ) {
       this.startMatch();
+    } else {
+      this.updateAbandonDeadline();
     }
   }
 
@@ -157,6 +211,8 @@ export class InputSyncerServer {
     const player = this.state.players.get(socketId);
     if (!player) return;
     if (!player.joined || !this.state.matchStarted || this.state.matchFinished)
+      return;
+    if (this.options.rejectInputAfterSessionFinish && player.sessionFinished)
       return;
 
     if (!data || typeof data !== 'object' || Array.isArray(data)) return;
@@ -191,13 +247,71 @@ export class InputSyncerServer {
     });
     this.onPlayerFinished(player);
 
-    if (this.state.matchStarted && !this.state.matchFinished) {
+    if (
+      this.options.quorumUserFinishEndsMatch &&
+      this.state.matchStarted &&
+      !this.state.matchFinished
+    ) {
       const allFinished = [...this.state.players.values()]
         .filter((p) => p.joined)
         .every((p) => p.finished);
 
       if (allFinished) {
-        this.finishMatch();
+        this.finishMatch(InputSyncerFinishReasons.Completed);
+      }
+    }
+  }
+
+  handlePlayerSessionFinish(
+    socketId: string,
+    data?: Record<string, unknown>,
+  ): void {
+    const player = this.state.players.get(socketId);
+    if (!player) return;
+    if (!player.joined || player.sessionFinished) return;
+
+    const payloadData = extractSessionFinishData(data);
+    const serialized = JSON.stringify(payloadData ?? {});
+    const byteCount = Buffer.byteLength(serialized, 'utf8');
+    if (byteCount > this.options.sessionFinishMaxPayloadBytes) {
+      console.warn(
+        `[InputSyncerServer] player-session-finish payload too large (${byteCount} bytes)`,
+      );
+      return;
+    }
+
+    player.sessionFinished = true;
+
+    const outbound = { userId: player.userId, data: payloadData ?? {} };
+
+    if (this.options.sessionFinishBroadcast) {
+      this.broadcastToJoined(
+        InputSyncerEvents.INPUT_SYNCER_PLAYER_SESSION_FINISH_EVENT,
+        outbound,
+      );
+    } else {
+      this.sendToSocket(
+        socketId,
+        InputSyncerEvents.INPUT_SYNCER_PLAYER_SESSION_FINISH_EVENT,
+        outbound,
+      );
+    }
+
+    this.onPlayerSessionFinished(player);
+
+    if (
+      this.options.rewardOutcomeDelivery ===
+      RewardOutcomeDeliveryMode.ServerHookPerUser
+    ) {
+      try {
+        const hookPayload: RewardPerUserHookPayload = {
+          matchInstanceId: this.options.matchInstanceId,
+          userId: player.userId,
+          data: payloadData ?? {},
+        };
+        this.options.onRewardHookPerUser?.(hookPayload);
+      } catch (e) {
+        console.warn('[InputSyncerServer] onRewardHookPerUser failed', e);
       }
     }
   }
@@ -208,10 +322,6 @@ export class InputSyncerServer {
 
     this.sendAllStepsToPlayer(socketId);
   }
-
-  // -------------------------
-  // QUERIES
-  // -------------------------
 
   getPlayerCount(): number {
     return this.state.players.size;
@@ -241,10 +351,6 @@ export class InputSyncerServer {
     return this.state.currentStep;
   }
 
-  // -------------------------
-  // PUBLIC MESSAGING
-  // -------------------------
-
   sendJsonToAll(event: string, data: unknown): void {
     this.broadcastToJoined(event, data);
   }
@@ -258,12 +364,64 @@ export class InputSyncerServer {
     }
   }
 
-  // -------------------------
-  // INTERNALS
-  // -------------------------
+  private checkMatchAbandonAfterPlayerRemoved(): void {
+    if (!this.state.matchStarted || this.state.matchFinished) return;
+
+    const joined = this.getJoinedPlayerCount();
+    if (joined === 0) {
+      this.finishMatch(InputSyncerFinishReasons.AllDisconnected);
+      return;
+    }
+
+    if (!this.options.allowLateJoin && joined < this.options.maxPlayers) {
+      this.finishMatch(InputSyncerFinishReasons.InsufficientPlayers);
+      return;
+    }
+
+    this.updateAbandonDeadline();
+  }
+
+  private updateAbandonDeadline(): void {
+    if (
+      this.options.abandonMatchTimeoutSeconds <= 0 ||
+      !this.state.matchStarted ||
+      this.state.matchFinished
+    ) {
+      this.abandonDeadlineMs = null;
+      return;
+    }
+
+    if (!this.options.allowLateJoin) {
+      this.abandonDeadlineMs = null;
+      return;
+    }
+
+    const joined = this.getJoinedPlayerCount();
+    if (joined > 0 && joined < this.options.maxPlayers) {
+      this.abandonDeadlineMs =
+        Date.now() + this.options.abandonMatchTimeoutSeconds * 1000;
+    } else {
+      this.abandonDeadlineMs = null;
+    }
+  }
+
+  private checkAbandonDeadlineExpired(): void {
+    if (
+      !this.state.matchStarted ||
+      this.state.matchFinished ||
+      this.abandonDeadlineMs == null
+    )
+      return;
+
+    if (Date.now() >= this.abandonDeadlineMs) {
+      this.abandonDeadlineMs = null;
+      this.finishMatch(InputSyncerFinishReasons.AbandonTimeout);
+    }
+  }
 
   private processStep(): void {
     try {
+      this.checkAbandonDeadlineExpired();
       this.processStepCore();
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -360,4 +518,15 @@ export class InputSyncerServer {
       this.stepInterval = null;
     }
   }
+}
+
+function extractSessionFinishData(
+  data?: Record<string, unknown>,
+): Record<string, unknown> | null {
+  if (data == null || typeof data !== 'object' || Array.isArray(data))
+    return {};
+  if (data.data != null && typeof data.data === 'object' && !Array.isArray(data.data)) {
+    return data.data as Record<string, unknown>;
+  }
+  return data as Record<string, unknown>;
 }

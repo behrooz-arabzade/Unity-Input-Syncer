@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using UnityEngine;
@@ -13,19 +14,22 @@ namespace UnityInputSyncerUTPServer
 {
     public class InputSyncerServer : IDisposable
     {
-        // Events
         public event Action<InputSyncerServerPlayer> OnPlayerConnected;
         public event Action<InputSyncerServerPlayer> OnPlayerDisconnected;
         public event Action<InputSyncerServerPlayer> OnPlayerJoined;
         public event Action<InputSyncerServerPlayer> OnPlayerFinished;
+        public event Action<InputSyncerServerPlayer> OnPlayerSessionFinished;
         public event Action OnMatchStarted;
         public event Action OnMatchFinished;
+        public event Action<string> OnMatchFinishedWithReason;
         public event Action<int, StepInputs> OnStepBroadcast;
 
         private ISocketServer Socket;
         private InputSyncerServerOptions Options;
         private InputSyncerServerState State;
         private bool Disposed;
+
+        private DateTime? AbandonDeadlineUtc;
 
         private Dictionary<string, List<Action<int, JToken>>> customJsonCallbacks =
             new Dictionary<string, List<Action<int, JToken>>>();
@@ -57,9 +61,7 @@ namespace UnityInputSyncerUTPServer
             RegisterProtocolHandlers();
         }
 
-        // -------------------------
-        // LIFECYCLE
-        // -------------------------
+        public string LastFinishReason { get; private set; }
 
         public void Start()
         {
@@ -80,20 +82,52 @@ namespace UnityInputSyncerUTPServer
 
             SendJsonToAllJoined(InputSyncerEvents.INPUT_SYNCER_START_EVENT, "{}");
             OnMatchStarted?.Invoke();
+            UpdateAbandonDeadline();
             Debug.Log("[InputSyncerServer] Match started");
         }
 
+        /// <summary>Ends the match with reason <see cref="InputSyncerFinishReasons.Completed"/>.</summary>
         public void FinishMatch()
+        {
+            FinishMatch(InputSyncerFinishReasons.Completed);
+        }
+
+        public void FinishMatch(string reason)
         {
             if (!State.MatchStarted || State.MatchFinished)
                 return;
 
+            var joinedUserIds = State.Players.Values.Where(p => p.Joined).Select(p => p.UserId).ToList();
+
             State.MatchFinished = true;
+            AbandonDeadlineUtc = null;
             PlayerLoopHook.Unregister(TickStep);
 
-            SendJsonToAllJoined(InputSyncerEvents.INPUT_SYNCER_FINISH_EVENT, "{}");
+            LastFinishReason = reason ?? InputSyncerFinishReasons.Completed;
+            string finishPayload = JsonConvert.SerializeObject(new { reason = LastFinishReason });
+            SendJsonToAllJoined(InputSyncerEvents.INPUT_SYNCER_FINISH_EVENT, finishPayload);
+
             OnMatchFinished?.Invoke();
-            Debug.Log("[InputSyncerServer] Match finished");
+            OnMatchFinishedWithReason?.Invoke(LastFinishReason);
+
+            if (Options.RewardOutcomeDelivery == RewardOutcomeDeliveryMode.ServerHookMatchOrReferee)
+            {
+                try
+                {
+                    Options.OnRewardHookMatch?.Invoke(new RewardMatchHookContext
+                    {
+                        MatchInstanceId = Options.MatchInstanceId ?? "",
+                        Reason = LastFinishReason,
+                        JoinedUserIds = joinedUserIds,
+                    });
+                }
+                catch (Exception e)
+                {
+                    Debug.LogWarning($"[InputSyncerServer] OnRewardHookMatch failed: {e.Message}");
+                }
+            }
+
+            Debug.Log($"[InputSyncerServer] Match finished ({LastFinishReason})");
         }
 
         public void Stop()
@@ -122,12 +156,10 @@ namespace UnityInputSyncerUTPServer
             Socket.Dispose();
         }
 
-        // -------------------------
-        // STEP TICK
-        // -------------------------
-
         private void TickStep()
         {
+            CheckAbandonDeadlineExpired();
+
             if (!State.MatchStarted || State.MatchFinished)
                 return;
 
@@ -138,6 +170,60 @@ namespace UnityInputSyncerUTPServer
                 State.StepAccumulator -= Options.StepIntervalSeconds;
                 ProcessStep();
             }
+        }
+
+        private void CheckAbandonDeadlineExpired()
+        {
+            if (!State.MatchStarted || State.MatchFinished || !AbandonDeadlineUtc.HasValue)
+                return;
+
+            if (DateTime.UtcNow >= AbandonDeadlineUtc.Value)
+            {
+                AbandonDeadlineUtc = null;
+                FinishMatch(InputSyncerFinishReasons.AbandonTimeout);
+            }
+        }
+
+        private void UpdateAbandonDeadline()
+        {
+            if (Options.AbandonMatchTimeoutSeconds <= 0f || !State.MatchStarted || State.MatchFinished)
+            {
+                AbandonDeadlineUtc = null;
+                return;
+            }
+
+            if (!Options.AllowLateJoin)
+            {
+                AbandonDeadlineUtc = null;
+                return;
+            }
+
+            int joined = GetJoinedPlayerCount();
+            if (joined > 0 && joined < Options.MaxPlayers)
+                AbandonDeadlineUtc = DateTime.UtcNow.AddSeconds(Options.AbandonMatchTimeoutSeconds);
+            else
+                AbandonDeadlineUtc = null;
+        }
+
+        private void CheckMatchAbandonAfterPlayerRemoved()
+        {
+            if (!State.MatchStarted || State.MatchFinished)
+                return;
+
+            int joined = GetJoinedPlayerCount();
+            if (joined == 0)
+            {
+                FinishMatch(InputSyncerFinishReasons.AllDisconnected);
+                return;
+            }
+
+            if (!Options.AllowLateJoin && joined < Options.MaxPlayers)
+            {
+                FinishMatch(InputSyncerFinishReasons.InsufficientPlayers);
+                return;
+            }
+
+            UpdateAbandonDeadline();
         }
 
         internal void ProcessStep()
@@ -167,10 +253,6 @@ namespace UnityInputSyncerUTPServer
             State.CurrentStep++;
         }
 
-        // -------------------------
-        // PROTOCOL HANDLERS
-        // -------------------------
-
         private void RegisterSocketEvents()
         {
             Socket.OnClientConnected += OnClientConnected;
@@ -179,7 +261,6 @@ namespace UnityInputSyncerUTPServer
 
         private void RegisterProtocolHandlers()
         {
-            // "join" event
             Socket.On(InputSyncerEvents.MATCH_USER_JOIN_EVENT, (connectionId, data) =>
             {
                 if (!State.Players.ContainsKey(connectionId))
@@ -211,20 +292,21 @@ namespace UnityInputSyncerUTPServer
                 OnPlayerJoined?.Invoke(player);
                 Debug.Log($"[InputSyncerServer] Player joined: {player.UserId}");
 
-                // Send step history to late joiner
                 if (State.MatchStarted && Options.AllowLateJoin && Options.SendStepHistoryOnLateJoin)
                 {
                     SendAllStepsToPlayer(connectionId);
                 }
 
-                // Auto-start if full
                 if (Options.AutoStartWhenFull && !State.MatchStarted && GetJoinedPlayerCount() >= Options.MaxPlayers)
                 {
                     StartMatch();
                 }
+                else
+                {
+                    UpdateAbandonDeadline();
+                }
             });
 
-            // "input" event
             Socket.On(InputSyncerEvents.MATCH_USER_INPUT_EVENT, (connectionId, data) =>
             {
                 if (!State.Players.ContainsKey(connectionId))
@@ -235,13 +317,15 @@ namespace UnityInputSyncerUTPServer
                 if (!player.Joined || !State.MatchStarted || State.MatchFinished)
                     return;
 
+                if (Options.RejectInputAfterSessionFinish && player.SessionFinished)
+                    return;
+
                 JObject inputPayload;
                 if (data is JObject jObj)
                     inputPayload = jObj;
                 else
                     return;
 
-                // Extract the inputData field and set server-authoritative userId
                 var inputData = inputPayload["inputData"] as JObject;
                 if (inputData != null)
                 {
@@ -250,13 +334,11 @@ namespace UnityInputSyncerUTPServer
                 }
                 else
                 {
-                    // If no inputData wrapper, use the whole payload
                     inputPayload["userId"] = player.UserId;
                     State.PendingInputs.Add(inputPayload);
                 }
             });
 
-            // "user-finish" event
             Socket.On(InputSyncerEvents.MATCH_USER_FINISH_EVENT, (connectionId, data) =>
             {
                 if (!State.Players.ContainsKey(connectionId))
@@ -275,8 +357,7 @@ namespace UnityInputSyncerUTPServer
                 OnPlayerFinished?.Invoke(player);
                 Debug.Log($"[InputSyncerServer] Player finished: {player.UserId}");
 
-                // Auto-finish if all joined players are finished
-                if (State.MatchStarted && !State.MatchFinished)
+                if (Options.QuorumUserFinishEndsMatch && State.MatchStarted && !State.MatchFinished)
                 {
                     bool allFinished = State.Players.Values
                         .Where(p => p.Joined)
@@ -284,12 +365,16 @@ namespace UnityInputSyncerUTPServer
 
                     if (allFinished)
                     {
-                        FinishMatch();
+                        FinishMatch(InputSyncerFinishReasons.Completed);
                     }
                 }
             });
 
-            // "request-all-steps" event
+            Socket.On(InputSyncerEvents.MATCH_PLAYER_SESSION_FINISH_EVENT, (connectionId, data) =>
+            {
+                HandlePlayerSessionFinish(connectionId, data);
+            });
+
             Socket.On(InputSyncerEvents.MATCH_USER_REQUEST_ALL_STEPS_EVENT, (connectionId, data) =>
             {
                 if (!State.Players.ContainsKey(connectionId))
@@ -297,6 +382,76 @@ namespace UnityInputSyncerUTPServer
 
                 SendAllStepsToPlayer(connectionId);
             });
+        }
+
+        private void HandlePlayerSessionFinish(int connectionId, JToken data)
+        {
+            if (!State.Players.ContainsKey(connectionId))
+                return;
+
+            var player = State.Players[connectionId];
+            if (!player.Joined || player.SessionFinished)
+                return;
+
+            JToken payloadData = ExtractSessionFinishData(data);
+            if (payloadData == null || payloadData.Type == JTokenType.Null ||
+                payloadData.Type == JTokenType.Undefined)
+                payloadData = new JObject();
+
+            string serialized = payloadData.ToString(Formatting.None);
+            int byteCount = Encoding.UTF8.GetByteCount(serialized);
+            if (byteCount > Options.SessionFinishMaxPayloadBytes)
+            {
+                Debug.LogWarning($"[InputSyncerServer] player-session-finish payload too large ({byteCount} bytes)");
+                return;
+            }
+
+            player.SessionFinished = true;
+
+            var outbound = new JObject
+            {
+                ["userId"] = player.UserId,
+                ["data"] = payloadData,
+            };
+            string outboundJson = outbound.ToString(Formatting.None);
+
+            if (Options.SessionFinishBroadcast)
+                SendJsonToAllJoined(InputSyncerEvents.INPUT_SYNCER_PLAYER_SESSION_FINISH_EVENT, outboundJson);
+            else
+                Socket.SendJson(connectionId, InputSyncerEvents.INPUT_SYNCER_PLAYER_SESSION_FINISH_EVENT, outboundJson);
+
+            OnPlayerSessionFinished?.Invoke(player);
+
+            if (Options.RewardOutcomeDelivery == RewardOutcomeDeliveryMode.ServerHookPerUser)
+            {
+                try
+                {
+                    Options.OnRewardHookPerUser?.Invoke(new RewardPerUserHookContext
+                    {
+                        MatchInstanceId = Options.MatchInstanceId ?? "",
+                        UserId = player.UserId,
+                        Data = payloadData.DeepClone(),
+                    });
+                }
+                catch (Exception e)
+                {
+                    Debug.LogWarning($"[InputSyncerServer] OnRewardHookPerUser failed: {e.Message}");
+                }
+            }
+        }
+
+        private static JToken ExtractSessionFinishData(JToken data)
+        {
+            if (data == null || data.Type == JTokenType.Null)
+                return new JObject();
+
+            if (data is JObject obj && obj["data"] != null)
+                return obj["data"];
+
+            if (data is JObject)
+                return data;
+
+            return new JObject();
         }
 
         private void SendAllStepsToPlayer(int connectionId)
@@ -318,7 +473,8 @@ namespace UnityInputSyncerUTPServer
             {
                 ConnectionId = connectionId,
                 Joined = false,
-                Finished = false
+                Finished = false,
+                SessionFinished = false,
             };
 
             State.Players[connectionId] = player;
@@ -336,11 +492,9 @@ namespace UnityInputSyncerUTPServer
 
             OnPlayerDisconnected?.Invoke(player);
             Debug.Log($"[InputSyncerServer] Client disconnected: {player.UserId ?? connectionId.ToString()}");
-        }
 
-        // -------------------------
-        // PUBLIC API - QUERIES
-        // -------------------------
+            CheckMatchAbandonAfterPlayerRemoved();
+        }
 
         public int GetPlayerCount()
         {
@@ -365,10 +519,6 @@ namespace UnityInputSyncerUTPServer
         public bool IsMatchStarted => State.MatchStarted;
         public bool IsMatchFinished => State.MatchFinished;
 
-        // -------------------------
-        // PUBLIC API - CUSTOM EVENTS
-        // -------------------------
-
         public void SendJsonToAll(string eventName, string json)
         {
             SendJsonToAllJoined(eventName, json);
@@ -387,10 +537,6 @@ namespace UnityInputSyncerUTPServer
         {
             Socket.On(eventName, callback);
         }
-
-        // -------------------------
-        // HELPERS
-        // -------------------------
 
         private void SendJsonToAllJoined(string eventName, string json)
         {

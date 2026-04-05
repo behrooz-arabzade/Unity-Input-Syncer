@@ -262,6 +262,29 @@ export class MatchGateway
     }
   }
 
+  @SubscribeMessage(InputSyncerEvents.MATCH_PLAYER_SESSION_FINISH_EVENT)
+  handlePlayerSessionFinish(
+    @ConnectedSocket() socket: Socket,
+    @MessageBody() data: unknown,
+  ): void {
+    try {
+      const server = this.getServerForSocket(socket.id);
+      if (!server) return;
+      server.handlePlayerSessionFinish(
+        socket.id,
+        normalizeMessageBody(data),
+      );
+    } catch (e) {
+      logGatewayError(
+        this.logger,
+        'handlePlayerSessionFinish',
+        socket.id,
+        e,
+      );
+      throw e;
+    }
+  }
+
   @SubscribeMessage(InputSyncerEvents.MATCH_USER_REQUEST_ALL_STEPS_EVENT)
   handleRequestAllSteps(@ConnectedSocket() socket: Socket): void {
     try {

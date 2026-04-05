@@ -28,6 +28,9 @@ public class SocketIOServerWindow : EditorWindow
     private int maxInstances = 10;
     private bool autoRecycle = true;
     private float idleTimeout = 0f;
+    private float maxInstanceLifetimeSeconds;
+    private float abandonMatchTimeoutSeconds;
+    private bool quorumUserFinishEndsMatch = true;
     /// <summary>When true, Unity starts <c>dist/cluster-primary.js</c> (multi-process + one public port).</summary>
     private bool useMultiCoreCluster;
     /// <summary>0 = Node default max(1, CPU count − 1); otherwise <c>INPUT_SYNCER_WORKER_COUNT</c>.</summary>
@@ -447,6 +450,21 @@ public class SocketIOServerWindow : EditorWindow
         maxInstances = EditorGUILayout.IntField("Max Instances", maxInstances);
         autoRecycle = EditorGUILayout.Toggle("Auto Recycle on Finish", autoRecycle);
         idleTimeout = EditorGUILayout.FloatField("Idle Timeout (s)", idleTimeout);
+        maxInstanceLifetimeSeconds = EditorGUILayout.FloatField(
+            new GUIContent(
+                "Max instance lifetime (s)",
+                "0 = off. Pool destroys instances older than this (seconds since creation)."),
+            maxInstanceLifetimeSeconds);
+        abandonMatchTimeoutSeconds = EditorGUILayout.FloatField(
+            new GUIContent(
+                "Abandon match timeout (s)",
+                "When Allow Late Join and lobby is partial, finish match after this idle time. 0 = off."),
+            abandonMatchTimeoutSeconds);
+        quorumUserFinishEndsMatch = EditorGUILayout.Toggle(
+            new GUIContent(
+                "Quorum user-finish ends match",
+                "When true, all players must emit user-finish for match-level on-finish. Disable for independent session-finish flows."),
+            quorumUserFinishEndsMatch);
 
         EditorGUILayout.Space(2);
         bool prevCluster = useMultiCoreCluster;
@@ -637,6 +655,9 @@ public class SocketIOServerWindow : EditorWindow
         sb.AppendLine($"export INPUT_SYNCER_MAX_INSTANCES={maxInstances}");
         sb.AppendLine($"export INPUT_SYNCER_AUTO_RECYCLE={(autoRecycle ? "true" : "false")}");
         sb.AppendLine($"export INPUT_SYNCER_IDLE_TIMEOUT={idleTimeout.ToString(CultureInfo.InvariantCulture)}");
+        sb.AppendLine($"export INPUT_SYNCER_MAX_INSTANCE_LIFETIME={maxInstanceLifetimeSeconds.ToString(CultureInfo.InvariantCulture)}");
+        sb.AppendLine($"export INPUT_SYNCER_ABANDON_MATCH_TIMEOUT={abandonMatchTimeoutSeconds.ToString(CultureInfo.InvariantCulture)}");
+        sb.AppendLine($"export INPUT_SYNCER_QUORUM_USER_FINISH_ENDS_MATCH={(quorumUserFinishEndsMatch ? "true" : "false")}");
         if (!string.IsNullOrEmpty(adminAuthToken))
             sb.AppendLine($"export INPUT_SYNCER_ADMIN_AUTH_TOKEN=\"{adminAuthToken.Replace("\"", "\\\"")}\"");
         else
@@ -1085,6 +1106,9 @@ public class SocketIOServerWindow : EditorWindow
             psi.EnvironmentVariables["INPUT_SYNCER_MAX_INSTANCES"] = maxInstances.ToString();
             psi.EnvironmentVariables["INPUT_SYNCER_AUTO_RECYCLE"] = autoRecycle ? "true" : "false";
             psi.EnvironmentVariables["INPUT_SYNCER_IDLE_TIMEOUT"] = idleTimeout.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            psi.EnvironmentVariables["INPUT_SYNCER_MAX_INSTANCE_LIFETIME"] = maxInstanceLifetimeSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            psi.EnvironmentVariables["INPUT_SYNCER_ABANDON_MATCH_TIMEOUT"] = abandonMatchTimeoutSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            psi.EnvironmentVariables["INPUT_SYNCER_QUORUM_USER_FINISH_ENDS_MATCH"] = quorumUserFinishEndsMatch ? "true" : "false";
             if (useMultiCoreCluster && clusterWorkerCount > 0)
                 psi.EnvironmentVariables["INPUT_SYNCER_WORKER_COUNT"] = clusterWorkerCount.ToString();
 
@@ -1397,6 +1421,9 @@ public class SocketIOServerWindow : EditorWindow
         EditorPrefs.SetInt("SocketIOServer_MaxInstances", maxInstances);
         EditorPrefs.SetBool("SocketIOServer_AutoRecycle", autoRecycle);
         EditorPrefs.SetFloat("SocketIOServer_IdleTimeout", idleTimeout);
+        EditorPrefs.SetFloat("SocketIOServer_MaxInstanceLifetime", maxInstanceLifetimeSeconds);
+        EditorPrefs.SetFloat("SocketIOServer_AbandonMatchTimeout", abandonMatchTimeoutSeconds);
+        EditorPrefs.SetBool("SocketIOServer_QuorumUserFinishEndsMatch", quorumUserFinishEndsMatch);
         EditorPrefs.SetBool("SocketIOServer_RunExternally", runServerExternally);
         EditorPrefs.SetBool("SocketIOServer_MultiCoreCluster", useMultiCoreCluster);
         EditorPrefs.SetInt("SocketIOServer_ClusterWorkerCount", clusterWorkerCount);
@@ -1416,6 +1443,9 @@ public class SocketIOServerWindow : EditorWindow
         maxInstances = EditorPrefs.GetInt("SocketIOServer_MaxInstances", 10);
         autoRecycle = EditorPrefs.GetBool("SocketIOServer_AutoRecycle", true);
         idleTimeout = EditorPrefs.GetFloat("SocketIOServer_IdleTimeout", 0f);
+        maxInstanceLifetimeSeconds = EditorPrefs.GetFloat("SocketIOServer_MaxInstanceLifetime", 0f);
+        abandonMatchTimeoutSeconds = EditorPrefs.GetFloat("SocketIOServer_AbandonMatchTimeout", 0f);
+        quorumUserFinishEndsMatch = EditorPrefs.GetBool("SocketIOServer_QuorumUserFinishEndsMatch", true);
         runServerExternally = EditorPrefs.GetBool("SocketIOServer_RunExternally", false);
         useMultiCoreCluster = EditorPrefs.GetBool("SocketIOServer_MultiCoreCluster", false);
         clusterWorkerCount = Mathf.Max(0, EditorPrefs.GetInt("SocketIOServer_ClusterWorkerCount", 0));

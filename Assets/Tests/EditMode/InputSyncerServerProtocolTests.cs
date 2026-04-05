@@ -755,6 +755,83 @@ namespace Tests.EditMode
 
             var finishMsgs = fakeSocket.GetMessagesByEvent(InputSyncerEvents.INPUT_SYNCER_FINISH_EVENT);
             Assert.AreEqual(2, finishMsgs.Count);
+            var jo = JObject.Parse(finishMsgs[0].Json);
+            Assert.AreEqual(InputSyncerFinishReasons.Completed, jo["reason"]?.ToString());
+        }
+
+        [Test]
+        public void PlayerSessionFinish_BroadcastsUserIdAndData()
+        {
+            int id1 = ConnectAndJoin("alice");
+            int id2 = ConnectAndJoin("bob");
+            server.StartMatch();
+            fakeSocket.ClearSentMessages();
+
+            fakeSocket.SimulateJsonEvent(id1, InputSyncerEvents.MATCH_PLAYER_SESSION_FINISH_EVENT,
+                JObject.FromObject(new { data = new { result = "win" } }));
+
+            var msgs = fakeSocket.GetMessagesByEvent(InputSyncerEvents.INPUT_SYNCER_PLAYER_SESSION_FINISH_EVENT);
+            Assert.AreEqual(2, msgs.Count);
+            var body = JObject.Parse(msgs[0].Json);
+            Assert.AreEqual("alice", body["userId"]?.ToString());
+            Assert.AreEqual("win", body["data"]?["result"]?.ToString());
+        }
+
+        [Test]
+        public void PlayerSessionFinish_DoesNotFinishMatch()
+        {
+            int id1 = ConnectAndJoin("alice");
+            ConnectAndJoin("bob");
+            server.StartMatch();
+            fakeSocket.SimulateJsonEvent(id1, InputSyncerEvents.MATCH_PLAYER_SESSION_FINISH_EVENT, new JObject());
+            Assert.IsFalse(server.IsMatchFinished);
+        }
+
+        [Test]
+        public void QuorumUserFinishEndsMatch_False_DoesNotAutoFinish()
+        {
+            server.Dispose();
+            fakeSocket = new FakeSocketServer();
+            server = new InputSyncerServer(fakeSocket, new InputSyncerServerOptions
+            {
+                MaxPlayers = 4,
+                AutoStartWhenFull = false,
+                QuorumUserFinishEndsMatch = false,
+            });
+            int id1 = ConnectAndJoin("alice");
+            int id2 = ConnectAndJoin("bob");
+            server.StartMatch();
+            fakeSocket.SimulateJsonEvent(id1, InputSyncerEvents.MATCH_USER_FINISH_EVENT, new JObject());
+            fakeSocket.SimulateJsonEvent(id2, InputSyncerEvents.MATCH_USER_FINISH_EVENT, new JObject());
+            Assert.IsFalse(server.IsMatchFinished);
+        }
+
+        [Test]
+        public void Disconnect_LastJoinedPlayerMidMatch_FinishesAllDisconnected()
+        {
+            int id1 = ConnectAndJoin("alice");
+            server.StartMatch();
+            fakeSocket.ClearSentMessages();
+            fakeSocket.SimulateClientDisconnect(id1);
+            Assert.IsTrue(server.IsMatchFinished);
+            var finishMsgs = fakeSocket.GetMessagesByEvent(InputSyncerEvents.INPUT_SYNCER_FINISH_EVENT);
+            Assert.GreaterOrEqual(finishMsgs.Count, 1);
+            var jo = JObject.Parse(finishMsgs[0].Json);
+            Assert.AreEqual(InputSyncerFinishReasons.AllDisconnected, jo["reason"]?.ToString());
+        }
+
+        [Test]
+        public void Disconnect_OnePlayerMidMatch_InsufficientPlayers()
+        {
+            int id1 = ConnectAndJoin("alice");
+            int id2 = ConnectAndJoin("bob");
+            server.StartMatch();
+            fakeSocket.ClearSentMessages();
+            fakeSocket.SimulateClientDisconnect(id1);
+            Assert.IsTrue(server.IsMatchFinished);
+            var finishMsgs = fakeSocket.GetMessagesByEvent(InputSyncerEvents.INPUT_SYNCER_FINISH_EVENT);
+            var jo = JObject.Parse(finishMsgs[0].Json);
+            Assert.AreEqual(InputSyncerFinishReasons.InsufficientPlayers, jo["reason"]?.ToString());
         }
 
         // =========================================================

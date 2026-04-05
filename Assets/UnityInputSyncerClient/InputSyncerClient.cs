@@ -144,6 +144,12 @@ namespace UnityInputSyncerClient
         public Action<string> OnError { get; set; }
         public Action<string> OnDisconnected { get; set; }
 
+        /// <summary>Server-driven match end; argument is <c>on-finish</c> JSON <c>reason</c>.</summary>
+        public Action<string> OnMatchFinishedWithReason { get; set; }
+
+        /// <summary>Per-player session finish from server (<c>userId</c>, <c>data</c> payload).</summary>
+        public Action<string, JToken> OnPlayerSessionFinish { get; set; }
+
         private bool OnMatchStartedInvoked = false;
         public Action OnMatchStarted { get; set; }
         public void HandleMatchStarted()
@@ -174,6 +180,38 @@ namespace UnityInputSyncerClient
             Driver.On(InputSyncerEvents.INPUT_SYNCER_START_EVENT, (response) =>
             {
                 HandleMatchStarted();
+            });
+
+            Driver.On(InputSyncerEvents.INPUT_SYNCER_FINISH_EVENT, (response) =>
+            {
+                string reason = InputSyncerFinishReasons.Completed;
+                try
+                {
+                    var jo = Driver.GetData<JObject>(response);
+                    if (jo != null && jo["reason"] != null)
+                        reason = jo["reason"].ToString();
+                }
+                catch
+                {
+                    /* keep default */
+                }
+                OnMatchFinishedWithReason?.Invoke(reason);
+            });
+
+            Driver.On(InputSyncerEvents.INPUT_SYNCER_PLAYER_SESSION_FINISH_EVENT, (response) =>
+            {
+                try
+                {
+                    var jo = Driver.GetData<JObject>(response);
+                    if (jo == null) return;
+                    string uid = jo["userId"]?.ToString() ?? "";
+                    JToken data = jo["data"] ?? new JObject();
+                    OnPlayerSessionFinish?.Invoke(uid, data);
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogWarning($"OnPlayerSessionFinish parse failed: {ex.Message}");
+                }
             });
         }
 
@@ -227,6 +265,41 @@ namespace UnityInputSyncerClient
             }
 
             Driver.Emit(InputSyncerEvents.MATCH_USER_JOIN_EVENT, new { userId });
+        }
+
+        /// <summary>Legacy quorum finish; emits <c>user-finish</c>.</summary>
+        public bool SendUserFinish()
+        {
+            if (Options.Mock)
+            {
+                Debug.LogWarning("Mock mode: SendUserFinish is a no-op.");
+                return true;
+            }
+            if (Driver == null || !Driver.IsConnected)
+            {
+                Debug.LogWarning("Socket is not connected. Cannot send user-finish.");
+                return false;
+            }
+            return Driver.Emit(InputSyncerEvents.MATCH_USER_FINISH_EVENT);
+        }
+
+        /// <summary>Independent per-player session finish with optional payload (echoed by server).</summary>
+        public bool SendPlayerSessionFinish(object data = null)
+        {
+            if (Options.Mock)
+            {
+                Debug.LogWarning("Mock mode: SendPlayerSessionFinish is a no-op.");
+                return true;
+            }
+            if (Driver == null || !Driver.IsConnected)
+            {
+                Debug.LogWarning("Socket is not connected. Cannot send player-session-finish.");
+                return false;
+            }
+            JToken dataToken = data == null
+                ? new JObject()
+                : data is JToken t ? t : JToken.FromObject(data);
+            return Driver.Emit(InputSyncerEvents.MATCH_PLAYER_SESSION_FINISH_EVENT, new { data = dataToken });
         }
 
         public InputSyncerState GetState()

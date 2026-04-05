@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using UnityInputSyncerCore;
 using UnityInputSyncerCore.UTPSocket;
 
 namespace UnityInputSyncerUTPServer
@@ -39,16 +40,28 @@ namespace UnityInputSyncerUTPServer
                     $"Cannot create instance: pool is full ({options.MaxInstances}/{options.MaxInstances}).");
 
             ushort port = AllocatePort();
+            string id = Guid.NewGuid().ToString();
 
+            var d = options.DefaultServerOptions;
+            var o = overrideOptions;
             var serverOptions = new InputSyncerServerOptions
             {
                 Port = port,
-                HeartbeatTimeout = overrideOptions?.HeartbeatTimeout ?? options.DefaultServerOptions.HeartbeatTimeout,
-                MaxPlayers = overrideOptions?.MaxPlayers ?? options.DefaultServerOptions.MaxPlayers,
-                AutoStartWhenFull = overrideOptions?.AutoStartWhenFull ?? options.DefaultServerOptions.AutoStartWhenFull,
-                StepIntervalSeconds = overrideOptions?.StepIntervalSeconds ?? options.DefaultServerOptions.StepIntervalSeconds,
-                AllowLateJoin = overrideOptions?.AllowLateJoin ?? options.DefaultServerOptions.AllowLateJoin,
-                SendStepHistoryOnLateJoin = overrideOptions?.SendStepHistoryOnLateJoin ?? options.DefaultServerOptions.SendStepHistoryOnLateJoin,
+                HeartbeatTimeout = o?.HeartbeatTimeout ?? d.HeartbeatTimeout,
+                MaxPlayers = o?.MaxPlayers ?? d.MaxPlayers,
+                AutoStartWhenFull = o?.AutoStartWhenFull ?? d.AutoStartWhenFull,
+                StepIntervalSeconds = o?.StepIntervalSeconds ?? d.StepIntervalSeconds,
+                AllowLateJoin = o?.AllowLateJoin ?? d.AllowLateJoin,
+                SendStepHistoryOnLateJoin = o?.SendStepHistoryOnLateJoin ?? d.SendStepHistoryOnLateJoin,
+                QuorumUserFinishEndsMatch = o?.QuorumUserFinishEndsMatch ?? d.QuorumUserFinishEndsMatch,
+                SessionFinishMaxPayloadBytes = o?.SessionFinishMaxPayloadBytes ?? d.SessionFinishMaxPayloadBytes,
+                SessionFinishBroadcast = o?.SessionFinishBroadcast ?? d.SessionFinishBroadcast,
+                RejectInputAfterSessionFinish = o?.RejectInputAfterSessionFinish ?? d.RejectInputAfterSessionFinish,
+                AbandonMatchTimeoutSeconds = o?.AbandonMatchTimeoutSeconds ?? d.AbandonMatchTimeoutSeconds,
+                RewardOutcomeDelivery = o?.RewardOutcomeDelivery ?? d.RewardOutcomeDelivery,
+                OnRewardHookPerUser = o?.OnRewardHookPerUser ?? d.OnRewardHookPerUser,
+                OnRewardHookMatch = o?.OnRewardHookMatch ?? d.OnRewardHookMatch,
+                MatchInstanceId = id,
             };
 
             ISocketServer socket = socketFactory?.Invoke(port);
@@ -56,7 +69,6 @@ namespace UnityInputSyncerUTPServer
                 ? new InputSyncerServer(socket, serverOptions)
                 : new InputSyncerServer(serverOptions);
 
-            string id = Guid.NewGuid().ToString();
             var instance = new ServerInstance(id, port, server);
 
             instance.OnStateChanged += HandleInstanceStateChanged;
@@ -123,6 +135,7 @@ namespace UnityInputSyncerUTPServer
         public void Tick()
         {
             ThrowIfDisposed();
+            ProcessMaxInstanceLifetime();
             ProcessIdleTimeouts();
             ProcessPendingDestroys();
         }
@@ -177,6 +190,25 @@ namespace UnityInputSyncerUTPServer
 
             if (newState == ServerInstanceState.Finished && options.AutoRecycleOnFinish)
             {
+                pendingDestroys.Add(instance.Id);
+            }
+        }
+
+        private void ProcessMaxInstanceLifetime()
+        {
+            if (options.MaxInstanceLifetimeSeconds <= 0f)
+                return;
+
+            var now = DateTime.UtcNow;
+            foreach (var instance in instances.Values.ToList())
+            {
+                var age = (now - instance.CreatedAt).TotalSeconds;
+                if (age < options.MaxInstanceLifetimeSeconds)
+                    continue;
+
+                if (instance.Server.IsMatchStarted && !instance.Server.IsMatchFinished)
+                    instance.Server.FinishMatch(InputSyncerFinishReasons.MaxInstanceLifetime);
+
                 pendingDestroys.Add(instance.Id);
             }
         }
