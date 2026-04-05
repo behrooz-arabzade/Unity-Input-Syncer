@@ -6,8 +6,13 @@ A Unity 6 library for deterministic multiplayer input synchronization using lock
 
 - [Introduction](#introduction)
 - [Architecture](#architecture)
+- [Wire protocol & events](#wire-protocol--events)
+- [Socket.IO server (NestJS)](#socketio-server-nestjs)
 - [Getting Started](#getting-started)
 - [How-To Examples](#how-to-examples)
+- [Admin HTTP API (workflows)](#admin-http-api-workflows)
+- [Match access (open / password / token)](#match-access-open--password--token)
+- [Match finish & session APIs](#match-finish--session-apis)
 - [SyncSimulation (ECS)](#syncsimulation-ecs)
 - [Features](#features)
 
@@ -20,11 +25,13 @@ Unity Input Syncer provides a client-side SDK and server components for synchron
 ### Key Highlights
 
 - **Dual transport support** — Connect via Socket.IO (TCP/WebSocket) or Unity Transport Package (UDP) with a single unified API.
-- **Dedicated server builds** — Ship headless servers from pre-configured Unity scenes, configurable via environment variables.
-- **Multi-instance server pool** — Host multiple match instances on a single machine with automatic port allocation and lifecycle management.
-- **Admin HTTP API** — Create, monitor, and destroy match instances via authenticated REST endpoints.
+- **Reference Socket.IO server** — A NestJS app under `Assets/UnityInputSyncerSocketIOServer/` implements the same match pool + admin API as the UTP multi-instance server (optional single-process or multi-worker cluster).
+- **Dedicated server builds** — Ship headless UTP servers from pre-configured Unity scenes, configurable via environment variables.
+- **Multi-instance server pool (UTP)** — Host multiple match instances on one machine with automatic port allocation and lifecycle management.
+- **Admin HTTP API** — Create, monitor, and destroy match instances via authenticated REST endpoints (UTP pool and NestJS server).
 - **Mock mode** — Develop and test game logic offline without a server.
-- **Server-side simulation** — Optionally run game simulation on the server for authoritative state.
+- **Match context & access control** — Admin-defined `matchData` / per-user payloads (`on-match-context`), plus optional password or token gates per instance.
+- **Optional ECS layer** — `SyncSimulation` builds a dedicated Entities world with prediction, rollback, and input merging on top of `InputSyncerState`.
 
 ---
 
@@ -48,48 +55,66 @@ Unity Input Syncer provides a client-side SDK and server components for synchron
 └──────────────┘         └──────────────────────┘         └──────────────┘
 ```
 
+### Choosing a Server Stack
+
+| Role | UTP (Unity / C#) | Socket.IO (NestJS) |
+|------|------------------|--------------------|
+| Process | Unity headless build (`DedicatedServerBootstrap` or `MultiInstanceServerBootstrap`) | Node.js (`npm run start:prod` or `start:cluster`) |
+| Client transport | `UTPClientDriver` (UDP) | `SocketIODriver` (WebSocket, path `/match-gateway`) |
+| Multi-match | `InputSyncerServerPool` + per-instance UDP ports | In-memory pool; all matches share the HTTP/WebSocket port; clients disambiguate with `matchId` query |
+| Admin API | `AdminHttpServer` on `INPUT_SYNCER_ADMIN_PORT` | Same routes on `INPUT_SYNCER_PORT` (Nest HTTP) |
+
+Game simulation still runs on clients in the default model; the server only synchronizes inputs (and optional custom JSON/binary events you add).
+
 ### Namespace Breakdown
 
-The codebase is organized into three main namespaces under `Assets/`:
+The codebase is organized under `Assets/`:
 
 **UnityInputSyncerCore** — Shared networking and utility layer.
 
 - `UTPSocket/` — Custom socket abstraction over Unity Transport Package (connection lifecycle, handshake, heartbeat, binary wire protocol).
 - `INativeArraySerializable` — Interface for binary serialization to/from `NativeArray<byte>`.
 - `InputSyncerEvents` — String constants for all protocol event names.
+- `InputSyncerFinishReasons` — Constants for `on-finish` payload `reason`.
 - `Utils/PlayerLoopHook` — Injects tick callbacks into Unity's player loop without MonoBehaviour.
 - `Utils/UnityThreadDispatcher` — Dispatches work back to the main thread from background tasks.
 
 **UnityInputSyncerClient** — Client SDK consumed by game code.
 
 - `IClientDriver` — Abstract base class defining the transport contract (connect, disconnect, emit, listen).
-- `SocketIODriver` — Socket.IO implementation (WebSocket, TCP only, no binary events).
-- `UTPClientDriver` — UTP implementation (UDP, supports reliable + unreliable channels and binary events).
-- `InputSyncerClient` — Main entry point. Wraps a driver, manages input collection, supports mock mode.
-- `InputSyncerState` — Tracks received steps, detects missed steps, triggers resync.
-- `BaseInputData` — Abstract base class for custom input types.
+- `SocketIODriver` — Socket.IO implementation: WebSocket only, fixed gateway path `/match-gateway`, query string from `SocketIODriverOptions.Payload`, optional `Authorization: Bearer` from `JwtToken`. **No binary events.**
+- `UTPClientDriver` — UTP implementation (UDP): reliable + unreliable channels, binary events, latency via heartbeat.
+- `InputSyncerClient` — Main entry point: wraps a driver, step batching, mock mode, match context, finish callbacks.
+- `InputSyncerState` — Tracks received steps, detects missed steps, triggers resync (`request-all-steps`).
+- `BaseInputData` — Abstract base class for custom input types (JSON-shaped on the wire).
 
-**SyncSimulation** — Optional ECS layer on top of `InputSyncerClient` (`Assets/SyncSimulation/`).
+**SyncSimulation** — Optional ECS layer (`Assets/SyncSimulation/`) on top of `InputSyncerClient`.
 
-- `SyncSimulationHost` — Dedicated `Unity.Entities` world, lockstep ingest from `InputSyncerState`, optional local prediction, rollback snapshots, manual `Tick()`.
-- `InputTimeline` — Merges authoritative steps with predicted local input (continuous carry + discrete events per step).
-- `RollbackSnapshotStore` — Ring buffer of blittable component snapshots keyed by completed step; culls mispredicted spawns via `SpawnedOnStep`.
+- `SyncSimulationHost` — Dedicated `Unity.Entities` world, lockstep ingest, optional prediction, rollback snapshots, manual `Tick()`.
+- `InputTimeline` — Merges authoritative steps with predicted local input.
+- `RollbackSnapshotStore` — Ring buffer of blittable component snapshots; culls mispredicted spawns via `SpawnedOnStep`.
+- `StepInputHash` — Deterministic-enough hashing of local-player inputs for misprediction checks.
 
-**UnityInputSyncerUTPServer** — Server components for hosting matches.
+**UnityInputSyncerUTPServer** — UTP server components.
 
-- `InputSyncerServer` — Core server logic: player management, step tick loop, input batching, broadcasting.
-- `DedicatedServerBootstrap` — MonoBehaviour that starts a single-instance server from a Unity scene.
-- `InputSyncerServerPool` — Manages multiple `InputSyncerServer` instances with port allocation and lifecycle.
-- `MultiInstanceServerBootstrap` — MonoBehaviour that starts a pool + admin HTTP server.
-- `AdminHttpServer` / `AdminController` — REST API for instance management.
-- `ServerInstance` — Wraps a server with state tracking (`Idle → WaitingForPlayers → InMatch → Finished`).
+- `InputSyncerServer` — Core server logic: players, step loop, batching, broadcast, match access handshake, finish reasons.
+- `DedicatedServerBootstrap` — Single-instance server from a scene.
+- `InputSyncerServerPool` / `MultiInstanceServerBootstrap` — Pool + `AdminHttpServer`.
+- `AdminController` — REST handler shared contract with NestJS admin routes.
+- `ServerInstance` — Wraps a server with lifecycle state (`Idle` → `WaitingForPlayers` → `InMatch` → `Finished`).
+
+**UnityInputSyncerSocketIOServer** — Reference NestJS + Socket.IO server (`package.json` at repo path above).
+
+- `MatchGateway` — WebSocket gateway on path `/match-gateway`; routes sockets to pool instances by `matchId` query.
+- `InputSyncerPoolService` — Instance pool (mirrors UTP pool semantics).
+- `AdminController` (`/api/...`) — Same REST surface as Unity admin (Bearer auth optional).
 
 ### Data Flow (Step by Step)
 
 1. Game code calls `InputSyncerClient.SendInput(BaseInputData)` — the driver emits an `"input"` event to the server.
-2. The server collects all incoming inputs into a pending queue.
-3. At each step interval (default 100ms), the server batches pending inputs into a numbered step and broadcasts it to all joined clients.
-4. `InputSyncerState` on each client collects the step. If a step is missed, it automatically sends `"request-all-steps"` for a full resync.
+2. The server collects incoming inputs into a pending queue.
+3. At each step interval (default 100ms), the server batches pending inputs into a numbered step and broadcasts `on-steps` to all joined clients.
+4. `InputSyncerState` on each client collects the step. If a step is missed, it automatically sends `request-all-steps` for a full resync (`on-all-steps`).
 5. Game code reads inputs each `FixedUpdate` via `GetState().HasStep(n)` and `GetState().GetInputsForStep(n)`.
 
 ### Transport Comparison
@@ -97,10 +122,11 @@ The codebase is organized into three main namespaces under `Assets/`:
 | Feature               | Socket.IO (`SocketIODriver`)           | UTP (`UTPClientDriver`)                |
 | --------------------- | -------------------------------------- | -------------------------------------- |
 | Protocol              | TCP / WebSocket                        | UDP (Unity Transport)                  |
+| Gateway / path        | Fixed: `/match-gateway`                | N/A (binary wire protocol)             |
 | Channels              | Reliable only                          | Reliable + Unreliable                  |
 | Binary events         | Not supported                          | Supported (`INativeArraySerializable`) |
 | Latency measurement   | Not supported (`LatencyMs` returns -1) | Supported via heartbeat ping/pong      |
-| Server implementation | External (any language)                | C# / Unity dedicated server            |
+| Server implementation | NestJS in repo or your own             | C# / Unity dedicated server            |
 
 ### Key Dependencies
 
@@ -109,7 +135,133 @@ The codebase is organized into three main namespaces under `Assets/`:
 | `com.unity.transport`             | 2.6.0   | UDP networking for UTP transport    |
 | `com.itisnajim.socketiounity`     | —       | WebSocket transport for Socket.IO   |
 | `com.unity.nuget.newtonsoft-json` | 3.2.2   | JSON serialization                  |
+| `com.unity.entities`              | 1.4.5+  | SyncSimulation ECS world            |
 | NuGetForUnity                     | —       | Additional NuGet package management |
+
+---
+
+## Wire protocol & events
+
+Event names are defined in `InputSyncerEvents` (C#) and mirrored in `input-syncer-events.ts` (NestJS).
+
+### Server → client
+
+| Event | Purpose |
+|-------|---------|
+| `on-steps` | Batch of `{ step, inputs[] }` for lockstep consumption. |
+| `on-all-steps` | Full resync: `{ steps[], lastSentStep, requestedUser }`. |
+| `on-start` | Match started (lobby → running); also used internally to surface `OnMatchStarted`. |
+| `on-match-context` | After join: `{ matchId, matchData, users }` from admin create payload. |
+| `on-finish` | Match ended: JSON with `reason` (see `InputSyncerFinishReasons`). |
+| `on-user-finish` | Legacy quorum signal when another player calls `user-finish`. |
+| `on-player-session-finish` | Per-player session end: `{ userId, data }`. |
+| `content-error` | Fatal setup errors (bad `matchId`, access denied, instance destroyed). |
+
+### Client → server
+
+| Event | Purpose |
+|-------|---------|
+| `join` | Associate connection with `userId` (and server player list). |
+| `input` | Gameplay input; body includes serialized `inputData`. |
+| `request-all-steps` | Client missed a step; requests history. |
+| `user-finish` | Legacy: signal “this player is done” for quorum match end. |
+| `player-session-finish` | Independent per-player finish with optional JSON `data` (size-limited on server). |
+
+---
+
+## Socket.IO server (NestJS)
+
+The folder `Assets/UnityInputSyncerSocketIOServer/` contains a **reference** multi-match server using Socket.IO 4.x and NestJS 11. It is intended to match the **behavior and admin API** of the Unity UTP pool so you can prototype or ship without a Unity headless build.
+
+### Install and run
+
+```bash
+cd Assets/UnityInputSyncerSocketIOServer
+npm ci
+npm run build
+npm run start:prod
+```
+
+- **Dev (watch):** `npm run start:dev`
+- **Listen port:** `INPUT_SYNCER_PORT` (default `3000`)
+- **Bind address:** optional `INPUT_SYNCER_BIND` (e.g. `0.0.0.0` or `127.0.0.1`)
+
+On boot, HTTP (including admin) and WebSocket share that port. Logs also mention:
+
+- Admin API: `http://localhost:<port>/api`
+- WebSocket path: `/match-gateway`
+
+### Unity editor integration
+
+Use **Socket.IO Server** in the Unity Editor (see `Assets/Editor/SocketIOServerWindow.cs`) to build/start the Nest app, optionally enable **multi-core cluster** mode, and inspect pool/instance admin responses without leaving the editor.
+
+### Environment variables (NestJS `AppModule`)
+
+Pool and defaults are driven by the same conceptual flags as the UTP multi-instance server:
+
+| Variable | Description |
+|----------|-------------|
+| `INPUT_SYNCER_PORT` | HTTP + Socket.IO listen port (default `3000`). |
+| `INPUT_SYNCER_BIND` | Optional bind address. |
+| `INPUT_SYNCER_MAX_INSTANCES` | Max concurrent match instances (default `10`). |
+| `INPUT_SYNCER_AUTO_RECYCLE` | Auto-remove finished instances (`true` / `1`). |
+| `INPUT_SYNCER_IDLE_TIMEOUT` | Seconds before destroying idle instances (`0` = off). |
+| `INPUT_SYNCER_MAX_INSTANCE_LIFETIME` | Hard cap on instance age in seconds (`0` = off). |
+| `INPUT_SYNCER_PUBLIC_CLIENT_SOCKET_IO_URL` | Public base URL (scheme + host + port, **no path**) embedded in admin `serverUrl` / `clientConnection.socketIoUrl` for real deployments (e.g. `https://game.example.com`). |
+| `INPUT_SYNCER_ADMIN_REQUIRE_MATCH_USER_DATA` | If `true`, `POST /api/instances` must include non-empty `matchData` and/or `users`. |
+| `INPUT_SYNCER_MAX_PLAYERS` | Default max players per instance. |
+| `INPUT_SYNCER_AUTO_START_WHEN_FULL` | Start match when lobby full. |
+| `INPUT_SYNCER_STEP_INTERVAL` | Step interval in seconds. |
+| `INPUT_SYNCER_ALLOW_LATE_JOIN` | Allow joins after match start. |
+| `INPUT_SYNCER_SEND_HISTORY_ON_LATE_JOIN` | Send step history to late joiners. |
+| `INPUT_SYNCER_QUORUM_USER_FINISH_ENDS_MATCH` | Require all players to emit `user-finish` before match end when using that flow. |
+| `INPUT_SYNCER_ABANDON_MATCH_TIMEOUT` | If set, can end matches stuck waiting for players (see server implementation). |
+| `INPUT_SYNCER_ADMIN_AUTH_TOKEN` | If non-empty, admin routes require `Authorization: Bearer <token>`. |
+| `INPUT_SYNCER_REWARD_OUTCOME_DELIVERY` | `0` = client-to-admin default; `1` / `2` = server hook modes (see `RewardOutcomeDeliveryMode` in server code). |
+
+`INPUT_SYNCER_EDITOR_LOG` can be set to a file path so Unity’s process launcher can tail logs across domain reloads.
+
+### Multi-core cluster (one machine)
+
+```bash
+npm run build
+npm run start:cluster
+```
+
+This runs `dist/cluster-primary.js`: a small primary accepts the **public** `INPUT_SYNCER_PORT`, spawns **worker** Nest processes on `127.0.0.1` at `INPUT_SYNCER_INTERNAL_PORT_BASE`, `BASE+1`, …, and proxies HTTP/WebSocket to the worker that owns a given `instanceId` / `matchId`.
+
+| Variable | Description |
+|----------|-------------|
+| `INPUT_SYNCER_WORKER_COUNT` | Worker processes (default ≈ logical CPUs − 1). |
+| `INPUT_SYNCER_INTERNAL_PORT_BASE` | First worker port; must be **greater than** `INPUT_SYNCER_PORT`. |
+| `INPUT_SYNCER_INTERNAL_SECRET` | On workers, validates internal admin/meta routes (generated by primary when forking). |
+
+If a worker crashes, its matches are lost; the primary clears routing and restarts workers after a delay.
+
+### Unity client connection (Socket.IO)
+
+`SocketIODriver` always uses path `/match-gateway` and WebSocket transport. Connection options come from **query string** entries in `SocketIODriverOptions.Payload`:
+
+- **`matchId`** — Required. For pooled servers, use the instance `id` returned by `POST /api/instances`.
+- **`userId`** — Strongly recommended. The gateway may treat this like UTP `AutoJoinOnConnect` and register the player on connect.
+- **`matchPassword`** / **`matchToken`** — Required when the instance was created with `matchAccess` `password` or `token` (see [Match access](#match-access-open--password--token)).
+
+`JwtToken` is sent as HTTP header `Authorization: Bearer …` during the Socket.IO handshake (for your own auth integration).
+
+```csharp
+var driverOptions = new SocketIODriverOptions
+{
+    Url = "http://localhost:3000",
+    Payload = new Dictionary<string, string>
+    {
+        { "matchId", instanceIdFromAdmin },
+        { "userId", localPlayerId },
+    },
+    JwtToken = optionalBearerToken,
+};
+```
+
+Optional test hooks on `SocketIODriverOptions`: `FakeLatency`, `ConnectDelayMs`, `EmitMinDelayMs`, `EmitMaxDelayMs`, `JsonSerializerSettings`.
 
 ---
 
@@ -118,17 +270,16 @@ The codebase is organized into three main namespaces under `Assets/`:
 ### Prerequisites
 
 - **Unity 6** (6000.3.0f1 or later)
-- All package dependencies are resolved via Unity Package Manager and NuGet (see `Assets/packages.config`)
+- **Node.js 18+** (for the NestJS Socket.IO server only)
+- Packages resolve via Unity Package Manager and NuGet (`Assets/packages.config`)
 
 ### Installation
 
 1. Clone or copy the repository into your Unity project.
-2. Open the project in Unity 6. Package dependencies will resolve automatically.
-3. Assembly definitions are pre-configured — reference `UnityInputSyncerClient` from your game assemblies to access the client SDK, or `UnityInputSyncerUTPServer` for server components.
+2. Open the project in Unity 6.
+3. Reference assemblies: `UnityInputSyncerClient` for the SDK; `UnityInputSyncerUTPServer` for server components; `SyncSimulation` for ECS helpers.
 
 ### Quick Start: Mock Mode (No Server)
-
-The fastest way to test input syncing logic without any server:
 
 ```csharp
 var client = new InputSyncerClient(null, new InputSyncerClientOptions
@@ -144,13 +295,11 @@ await client.ConnectAsync();
 client.JoinMatch("player-1");
 ```
 
-In mock mode, inputs sent via `SendInput()` are collected locally and delivered as steps on the configured interval.
-
 ### Quick Start: UTP Dedicated Server
 
-1. Open `Assets/Scenes/DedicatedServerScene.unity` — it contains a `DedicatedServerBootstrap` component that starts a UTP server on launch.
-2. Build the server: `make build-server` (produces a headless macOS build in `Builds/Server/`).
-3. Run the server build, then connect a client:
+1. Open `Assets/Scenes/DedicatedServerScene.unity` (contains `DedicatedServerBootstrap`).
+2. Build: `make build-server` → `Builds/Server/`.
+3. Connect:
 
 ```csharp
 var driver = new UTPClientDriver(new UTPDriverOptions
@@ -164,64 +313,76 @@ bool connected = await client.ConnectAsync();
 client.JoinMatch("player-1");
 ```
 
-### Build Targets
+### Quick Start: Socket.IO (NestJS)
+
+1. Build and run the Nest server (`npm run start:prod` in `Assets/UnityInputSyncerSocketIOServer`).
+2. Create an instance via admin API or use a known `matchId` if you run a single static config.
+3. Use `SocketIODriver` with `Payload` containing at least `matchId` and `userId`.
+
+### Build targets
 
 ```bash
 make test               # Run all tests (edit mode + play mode)
 make test-edit          # Edit mode tests only
 make test-play          # Play mode tests only
-make build-server       # Build single-instance dedicated server
-make build-multi-server # Build multi-instance dedicated server
+make build-server       # Build single-instance UTP dedicated server
+make build-multi-server # Build multi-instance UTP server (see note below)
 ```
 
-### Environment Variable Configuration
+**Multi-instance Unity build:** `BuildServer.cs` expects `Assets/Scenes/MultiInstanceServerScene.unity`. That scene is not always present in the tree; if `make build-multi-server` fails, create a scene with a single root object and `MultiInstanceServerBootstrap`, save it at that path, then rebuild.
 
-All server options can be set via the Unity Inspector or overridden with environment variables at runtime. Bool values accept `true`/`false` or `1`/`0`.
+### Environment variable configuration
 
-#### Single-Instance Server (`DedicatedServerBootstrap`)
+Bool values accept `true`/`false` or `1`/`0`. Inspector values on bootstraps are overridden when env vars are set.
 
-| Env Var                                  | Type   | Default | Description                               |
-| ---------------------------------------- | ------ | ------- | ----------------------------------------- |
-| `INPUT_SYNCER_PORT`                      | ushort | 7777    | Server listen port                        |
-| `INPUT_SYNCER_MAX_PLAYERS`               | int    | 2       | Max connected players                     |
-| `INPUT_SYNCER_AUTO_START_WHEN_FULL`      | bool   | true    | Start match when lobby is full            |
-| `INPUT_SYNCER_STEP_INTERVAL`             | float  | 0.1     | Seconds between step broadcasts           |
-| `INPUT_SYNCER_ALLOW_LATE_JOIN`           | bool   | false   | Allow joining after match start           |
-| `INPUT_SYNCER_SEND_HISTORY_ON_LATE_JOIN` | bool   | true    | Send step history to late joiners         |
-| `INPUT_SYNCER_HEARTBEAT_TIMEOUT`         | float  | 15      | Seconds before disconnecting idle clients |
+#### Single-instance server (`DedicatedServerBootstrap`)
 
-#### Multi-Instance Server (`MultiInstanceServerBootstrap`)
+| Env Var | Type | Default | Description |
+| ------- | ---- | ------- | ----------- |
+| `INPUT_SYNCER_PORT` | ushort | 7777 | Server listen port |
+| `INPUT_SYNCER_MAX_PLAYERS` | int | 2 | Max connected players |
+| `INPUT_SYNCER_AUTO_START_WHEN_FULL` | bool | true | Start match when lobby is full |
+| `INPUT_SYNCER_AUTO_JOIN_ON_CONNECT` | bool | true | Apply join/handshake on connect (aligns with Socket.IO gateway) |
+| `INPUT_SYNCER_STEP_INTERVAL` | float | 0.1 | Seconds between step broadcasts |
+| `INPUT_SYNCER_ALLOW_LATE_JOIN` | bool | false | Allow joining after match start |
+| `INPUT_SYNCER_SEND_HISTORY_ON_LATE_JOIN` | bool | true | Send step history to late joiners |
+| `INPUT_SYNCER_HEARTBEAT_TIMEOUT` | float | 15 | Seconds before disconnecting idle clients |
+| `INPUT_SYNCER_ABANDON_MATCH_TIMEOUT` | float | 0 | Optional timeout when waiting for players with late join (`0` = disabled) |
+| `INPUT_SYNCER_QUORUM_USER_FINISH_ENDS_MATCH` | bool | true | Legacy `user-finish` quorum ends match |
+| `INPUT_SYNCER_SESSION_FINISH_MAX_PAYLOAD_BYTES` | int | 4096 | Max UTF-8 bytes for `player-session-finish` data |
+| `INPUT_SYNCER_SESSION_FINISH_BROADCAST` | bool | true | Broadcast `on-player-session-finish` to all players |
+| `INPUT_SYNCER_REJECT_INPUT_AFTER_SESSION_FINISH` | bool | false | Drop gameplay input after a player finishes session |
+| `INPUT_SYNCER_REWARD_OUTCOME_DELIVERY` | int | 0 | `0` default; `1` / `2` server hook modes |
 
-All of the above plus:
+#### Multi-instance server (`MultiInstanceServerBootstrap`)
 
-| Env Var                         | Type   | Default | Description                                             |
-| ------------------------------- | ------ | ------- | ------------------------------------------------------- |
-| `INPUT_SYNCER_BASE_PORT`        | ushort | 7778    | Starting port for instance allocation                   |
-| `INPUT_SYNCER_MAX_INSTANCES`    | int    | 10      | Maximum concurrent match instances                      |
-| `INPUT_SYNCER_AUTO_RECYCLE`     | bool   | true    | Auto-destroy finished instances                         |
-| `INPUT_SYNCER_ADMIN_PORT`       | ushort | 8080    | Admin HTTP listen port                                  |
-| `INPUT_SYNCER_ADMIN_AUTH_TOKEN` | string | ""      | Bearer token for admin API (empty = no auth)            |
-| `INPUT_SYNCER_IDLE_TIMEOUT`     | float  | 0       | Seconds before destroying idle instances (0 = disabled) |
+All single-instance options above apply as **defaults** for new instances, plus:
 
-### Running Tests
+| Env Var | Type | Default | Description |
+| ------- | ---- | ------- | ----------- |
+| `INPUT_SYNCER_BASE_PORT` | ushort | 7778 | First UDP port for instances |
+| `INPUT_SYNCER_MAX_INSTANCES` | int | 10 | Maximum concurrent instances |
+| `INPUT_SYNCER_AUTO_RECYCLE` | bool | true | Auto-destroy finished instances |
+| `INPUT_SYNCER_ADMIN_PORT` | ushort | 8080 | Admin HTTP listen port |
+| `INPUT_SYNCER_ADMIN_AUTH_TOKEN` | string | "" | Bearer token for admin API (empty = no auth) |
+| `INPUT_SYNCER_IDLE_TIMEOUT` | float | 0 | Seconds before destroying idle instances (`0` = off) |
+| `INPUT_SYNCER_MAX_INSTANCE_LIFETIME` | float | 0 | Hard lifetime cap per instance (`0` = off) |
+| `INPUT_SYNCER_PUBLIC_HOST` | string | "" | Hostname/IP **without scheme**; fills `serverUrl` / `clientConnection.host` as `host:port` for UTP clients |
+| `INPUT_SYNCER_ADMIN_REQUIRE_MATCH_USER_DATA` | bool | false | Require non-empty `matchData` and/or `users` on create |
 
-Tests use Unity Test Framework (v1.6.0):
+### Running tests
 
 ```bash
-make test          # All tests
-make test-edit     # Edit mode tests (Assets/Tests/EditMode/)
-make test-play     # Play mode tests (Assets/Tests/PlayMode/)
+make test
 ```
 
-Or use **Window > General > Test Runner** in the Unity Editor.
+Or **Window > General > Test Runner** in the Unity Editor.
 
 ---
 
 ## How-To Examples
 
 ### Define a Custom Input Type
-
-Extend `BaseInputData` with a unique `type` string:
 
 ```csharp
 using UnityInputSyncerClient;
@@ -241,23 +402,17 @@ public class MoveInputData
 }
 ```
 
-Send it:
+Send and parse (receiving side often sees `JObject`):
 
 ```csharp
 client.SendInput(new MoveInput(new MoveInputData { dx = 1, dy = 0 }));
-```
 
-Read it back from a step (inputs arrive as `JObject` on the receiving side):
-
-```csharp
 using Newtonsoft.Json.Linq;
-
 var inputs = client.GetState().GetInputsForStep(step);
 foreach (var rawInput in inputs)
 {
     JObject input = JObject.FromObject(rawInput);
     string inputType = input.Value<string>("type");
-
     if (inputType == "move")
     {
         var data = input["data"] as JObject;
@@ -278,10 +433,10 @@ var driverOptions = new SocketIODriverOptions
     Url = "http://localhost:3000",
     Payload = new Dictionary<string, string>
     {
-        { "matchId", "my-match" },
+        { "matchId", "instance-id-from-admin" },
         { "userId", "player-1" },
     },
-    JwtToken = "your-auth-token",
+    JwtToken = "",
 };
 
 var client = new InputSyncerClient(
@@ -290,30 +445,41 @@ var client = new InputSyncerClient(
 );
 
 client.OnMatchStarted += () => Debug.Log("Match started");
+client.OnMatchContext = ctx => { /* matchData / users */ };
+client.OnMatchFinishedWithReason += reason => Debug.Log($"Finished: {reason}");
 client.OnConnected += () => Debug.Log("Connected");
 client.OnDisconnected += (reason) => Debug.Log($"Disconnected: {reason}");
 client.OnError += (msg) => Debug.LogError($"Error: {msg}");
 
 bool connected = await client.ConnectAsync();
 if (connected)
-{
     client.JoinMatch("player-1");
-}
+```
+
+Listen for fatal setup errors from the gateway:
+
+```csharp
+using UnityInputSyncerCore;
+
+client.RegisterOnCustomEvent(InputSyncerEvents.INPUT_SYNCER_CONTENT_ERROR, response =>
+{
+    var jo = client.Driver.GetData<Newtonsoft.Json.Linq.JObject>(response);
+    Debug.LogWarning($"content-error: {jo?["reason"]} — {jo?["message"]}");
+});
 ```
 
 ### Connect with UTP
 
-```csharp
-using UnityInputSyncerClient;
-using UnityInputSyncerClient.Drivers;
+Handshake payload is built from `UTPDriverOptions.Payload` (JSON). For password/token matches, include `matchPassword` or `matchToken` keys there in addition to `matchId` / `userId`.
 
+```csharp
 var driverOptions = new UTPDriverOptions
 {
     Ip = "127.0.0.1",
-    Port = 7777,
+    Port = 7778,
     Payload = new Dictionary<string, string>
     {
-        { "matchId", "my-match" },
+        { "matchId", "pool-instance-id" },
         { "userId", "player-1" },
     },
 };
@@ -323,18 +489,12 @@ var client = new InputSyncerClient(
     new InputSyncerClientOptions { StepIntervalMs = 100 }
 );
 
-client.OnMatchStarted += () => Debug.Log("Match started");
-
 bool connected = await client.ConnectAsync();
 if (connected)
-{
     client.JoinMatch("player-1");
-}
 ```
 
-### Consume Inputs in FixedUpdate
-
-The standard pattern for reading synchronized inputs in your game loop:
+### Consume inputs in FixedUpdate
 
 ```csharp
 public class GameSimulation : MonoBehaviour
@@ -349,31 +509,18 @@ public class GameSimulation : MonoBehaviour
         while (state.HasStep(currentStep))
         {
             var inputs = state.GetInputsForStep(currentStep);
-
             foreach (var rawInput in inputs)
             {
                 JObject input = JObject.FromObject(rawInput);
                 ProcessInput(input);
             }
-
             currentStep++;
         }
-    }
-
-    private void ProcessInput(JObject input)
-    {
-        string type = input.Value<string>("type");
-        string userId = input.Value<string>("userId");
-        // Handle each input type...
     }
 }
 ```
 
-### Set Up a Dedicated Server
-
-**Option A: Use the pre-built scene.** Open `Assets/Scenes/DedicatedServerScene.unity`, configure the `DedicatedServerBootstrap` component in the Inspector, and build with `make build-server`. Override settings at runtime with environment variables.
-
-**Option B: Create a server from code.**
+### Set Up a Dedicated Server (code)
 
 ```csharp
 using UnityInputSyncerUTPServer;
@@ -394,7 +541,6 @@ public class MyServer : MonoBehaviour
         };
 
         server = new InputSyncerServer(options);
-
         server.OnPlayerJoined += player => Debug.Log($"Player joined: {player.UserId}");
         server.OnMatchStarted += () => Debug.Log("Match started!");
         server.OnStepBroadcast += (step, data) =>
@@ -403,91 +549,15 @@ public class MyServer : MonoBehaviour
         server.Start();
     }
 
-    void OnDestroy()
-    {
-        server?.Dispose();
-    }
+    void OnDestroy() => server?.Dispose();
 }
 ```
 
-### Run Server-Side Simulation
+### Run server-side simulation hooks
 
-Attach a simulation component alongside `DedicatedServerBootstrap`. The server processes inputs each step and broadcasts authoritative game state via a custom event:
+See existing doc pattern: subscribe to `OnStepBroadcast` and call `SendJsonToAll` / per-player sends; clients use `RegisterOnCustomEvent`.
 
-```csharp
-using UnityInputSyncerUTPServer;
-using UnityInputSyncerClient;
-using Newtonsoft.Json;
-using Newtonsoft.Json.Linq;
-
-public class MyServerSimulation : MonoBehaviour
-{
-    [SerializeField] private DedicatedServerBootstrap bootstrap;
-
-    private Dictionary<string, Vector2Int> playerPositions = new();
-
-    void Start()
-    {
-        var server = bootstrap.Server;
-
-        server.OnPlayerJoined += player =>
-        {
-            playerPositions[player.UserId] = Vector2Int.zero;
-        };
-
-        server.OnPlayerDisconnected += player =>
-        {
-            if (player.UserId != null)
-                playerPositions.Remove(player.UserId);
-        };
-
-        server.OnStepBroadcast += (step, stepInputs) =>
-        {
-            // Process inputs
-            foreach (var rawInput in stepInputs.inputs)
-            {
-                JObject input = JObject.FromObject(rawInput);
-                if (input.Value<string>("type") != "move") continue;
-
-                string userId = input.Value<string>("userId");
-                var data = input["data"] as JObject;
-                int dx = data.Value<int>("dx");
-                int dy = data.Value<int>("dy");
-
-                if (playerPositions.ContainsKey(userId))
-                {
-                    var pos = playerPositions[userId];
-                    playerPositions[userId] = new Vector2Int(pos.x + dx, pos.y + dy);
-                }
-            }
-
-            // Broadcast authoritative state
-            string json = JsonConvert.SerializeObject(new
-            {
-                step,
-                players = playerPositions
-            });
-            server.SendJsonToAll("game-state", json);
-        };
-    }
-}
-```
-
-On the client side, listen for the custom event:
-
-```csharp
-client.RegisterOnCustomEvent("game-state", response =>
-{
-    var state = client.Driver.GetData<MyGameState>(response);
-    // Update visuals from authoritative state
-});
-```
-
-### Multi-Instance Server with Admin API
-
-The multi-instance server runs a pool of match instances managed through an HTTP admin API.
-
-**Setup:** Use `Assets/Scenes/MultiInstanceServerScene.unity` with the `MultiInstanceServerBootstrap` component, or create programmatically:
+### Multi-instance pool (code)
 
 ```csharp
 var poolOptions = new InputSyncerServerPoolOptions
@@ -496,6 +566,7 @@ var poolOptions = new InputSyncerServerPoolOptions
     MaxInstances = 10,
     AutoRecycleOnFinish = true,
     IdleTimeoutSeconds = 300,
+    PublicHost = "game.example.com",
     DefaultServerOptions = new InputSyncerServerOptions
     {
         MaxPlayers = 2,
@@ -507,150 +578,177 @@ var poolOptions = new InputSyncerServerPoolOptions
 var pool = new InputSyncerServerPool(poolOptions);
 ```
 
-**Admin API Endpoints:**
-
-All endpoints require `Authorization: Bearer <token>` if `INPUT_SYNCER_ADMIN_AUTH_TOKEN` is set.
-
-| Method   | Path                  | Description                 |
-| -------- | --------------------- | --------------------------- |
-| `POST`   | `/api/instances`      | Create a new match instance |
-| `GET`    | `/api/instances`      | List all instances          |
-| `GET`    | `/api/instances/{id}` | Get instance details        |
-| `DELETE` | `/api/instances/{id}` | Destroy an instance         |
-| `GET`    | `/api/stats`          | Get pool statistics         |
-
-**Create instance (with optional overrides):**
-
-Optional JSON fields:
-
-- `matchData` — opaque object stored on the instance and sent to every client in `on-match-context` after they join.
-- `users` — object map `userId →` opaque per-player simulation payload (equipment, stats, etc.); same event delivers the full map to all clients.
-- Match access fields: `matchAccess`, `matchPassword`, `allowedMatchTokens` (see server docs).
-
-Size limits (UTP admin and Socket.IO admin): `matchData` ≤ 65536 UTF-8 bytes; each `users` entry ≤ 16384 bytes; at most 64 user entries.
-
-If `INPUT_SYNCER_ADMIN_REQUIRE_MATCH_USER_DATA` is `true` / `1`, the body must include non-empty `matchData` and/or non-empty `users`.
-
-```bash
-curl -X POST http://localhost:8080/api/instances \
-  -H "Authorization: Bearer your-token" \
-  -H "Content-Type: application/json" \
-  -d '{"maxPlayers": 4, "stepIntervalSeconds": 0.05, "matchData": {"map": "arena"}, "users": {"p1": {"hp": 100}}}'
-```
-
-Response (UTP multi-instance; fields vary slightly for Socket.IO):
-
-```json
-{
-  "id": "abc-123",
-  "port": 7778,
-  "state": "Idle",
-  "createdAt": "2026-01-01T00:00:00Z",
-  "serverUrl": "game.example.com:7778",
-  "clientConnection": {
-    "transport": "utp",
-    "matchId": "abc-123",
-    "host": "game.example.com",
-    "port": 7778,
-    "socketIoUrl": null,
-    "matchGatewayPath": null
-  }
-}
-```
-
-- `serverUrl` and `clientConnection` are populated when a **public host** is configured (`INPUT_SYNCER_PUBLIC_HOST` on the Unity multi-instance server). Otherwise they may be omitted (`serverUrl`) or have an empty `host`.
-- **Socket.IO** pool: set `INPUT_SYNCER_PUBLIC_CLIENT_SOCKET_IO_URL` (e.g. `https://game.example.com`) so `serverUrl` and `clientConnection.socketIoUrl` point at the public entry; `clientConnection.matchGatewayPath` is `/match-gateway`. All instances share the same listener port; `matchId` in `clientConnection` is the instance id clients pass as the `matchId` query parameter.
-
-**Instance lifecycle states:** `Idle` → `WaitingForPlayers` → `InMatch` → `Finished`
-
-Clients connect using `clientConnection` / `serverUrl` as appropriate (UTP: host + port; Socket.IO: base URL + gateway path + `matchId` query).
-
 ### Match context on the client (`on-match-context`)
-
-After a successful join, the server emits **`on-match-context`** with JSON:
-
-`{ "matchId", "matchData", "users" }` — the same admin snapshot for every player.
 
 ```csharp
 client.OnMatchContext = ctx =>
 {
     string id = ctx.MatchId;
     JToken match = ctx.MatchData;
-    JObject allUsers = ctx.Users; // per userId, game-defined payloads
+    JObject allUsers = ctx.Users;
 };
-// Or read client.LastMatchContext after the event fired.
 ```
 
-This is not fired in **mock** mode.
+Not fired in **mock** mode.
 
 ### Use Mock Mode for Offline Testing
 
-Mock mode runs a local step loop with no server connection — useful for developing and testing game logic in isolation:
+Custom events are not supported in mock mode (`RegisterOnCustomEvent` logs a warning). `SendUserFinish` / `SendPlayerSessionFinish` are no-ops in mock mode.
 
-```csharp
-var client = new InputSyncerClient(null, new InputSyncerClientOptions
+---
+
+## Admin HTTP API (workflows)
+
+Both the **UTP** multi-instance server (`AdminHttpServer` on `INPUT_SYNCER_ADMIN_PORT`) and the **NestJS** server (same routes on `INPUT_SYNCER_PORT`) implement:
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/instances` | Create a new match instance |
+| `GET` | `/api/instances` | List instances |
+| `GET` | `/api/instances/{id}` | Instance details |
+| `DELETE` | `/api/instances/{id}` | Destroy instance |
+| `GET` | `/api/stats` | Pool statistics + optional per-instance summary |
+
+### Authentication
+
+If `INPUT_SYNCER_ADMIN_AUTH_TOKEN` is set (Unity) or non-empty in Nest `AppModule`, every request must include:
+
+```http
+Authorization: Bearer <token>
+```
+
+### Typical operator flow
+
+1. **Provision** — `POST /api/instances` with optional overrides (see body fields below).
+2. **Distribute** — Send each player the `clientConnection` object (or `serverUrl`) from the response so they configure `UTPClientDriver` or `SocketIODriver`.
+3. **Observe** — Poll `GET /api/stats` or `GET /api/instances/{id}` for `state`, `playerCount`, `matchStarted`, `matchFinished`, `currentStep`.
+4. **Tear down** — `DELETE /api/instances/{id}` when the match is done (or rely on auto-recycle / idle timeout).
+
+### `POST /api/instances` body (optional fields)
+
+All fields are optional; omitted fields keep pool/module defaults.
+
+| Field | Description |
+|-------|-------------|
+| `maxPlayers` | ≥ 1 |
+| `stepIntervalSeconds` | > 0 |
+| `autoStartWhenFull` | bool |
+| `allowLateJoin` | bool |
+| `sendStepHistoryOnLateJoin` | bool |
+| `matchAccess` | `"open"` \| `"password"` \| `"token"` |
+| `matchPassword` | Required when `matchAccess` is `password` |
+| `allowedMatchTokens` | Non-empty string array when `matchAccess` is `token` (max 64 tokens, 256 chars each) |
+| `matchData` | Arbitrary JSON object stored on the instance; sent to clients in `on-match-context` |
+| `users` | Map of `userId` → arbitrary JSON; merged into `on-match-context.users` |
+
+**Size limits (validation):** `matchData` ≤ 65536 UTF-8 bytes; each `users` entry ≤ 16384 bytes; at most 64 user keys. If `INPUT_SYNCER_ADMIN_REQUIRE_MATCH_USER_DATA` is enabled, `matchData` and/or `users` must be non-empty.
+
+### Responses
+
+- **201** — Create success; body is instance descriptor.
+- **200** — List, get, delete success, stats.
+- **400** — Invalid JSON or validation errors (`details` array).
+- **404** — Unknown instance or unknown route.
+- **405** — Wrong HTTP method.
+- **409** — Pool full or similar `InvalidOperationException` message from the pool.
+
+**UTP** `clientConnection` example shape:
+
+```json
 {
-    Mock = true,
-    MockCurrentUserId = "test-player",
-    StepIntervalMs = 100,
-});
-
-await client.ConnectAsync();
-client.JoinMatch("test-player");
-
-// Inputs are collected and delivered as steps locally
-client.SendInput(new MoveInput(new MoveInputData { dx = 1, dy = 0 }));
-
-// Read them back in FixedUpdate as usual
-var state = client.GetState();
-if (state.HasStep(0))
-{
-    var inputs = state.GetInputsForStep(0);
-    // Process inputs...
+  "transport": "utp",
+  "matchId": "instance-uuid",
+  "host": "game.example.com",
+  "port": 7778,
+  "socketIoUrl": null,
+  "matchGatewayPath": null
 }
 ```
 
-Note: Custom events via `RegisterOnCustomEvent` are not supported in mock mode.
+**Socket.IO** shape uses `transport: "socket.io"`, shared listener `port`, `socketIoUrl` set from `INPUT_SYNCER_PUBLIC_CLIENT_SOCKET_IO_URL` or localhost default, and `matchGatewayPath: "/match-gateway"`.
+
+**`GET /api/stats`** includes counts (`idleCount`, `waitingCount`, `inMatchCount`, `finishedCount`, `availableSlots`) and `resourceUsage`. Unity reports `managedMemoryBytes` / `workingSetBytes`; Node reports `heapUsedBytes` / `rssBytes`.
+
+### Example: create and connect (curl + Unity)
+
+```bash
+curl -s -X POST http://localhost:8080/api/instances \
+  -H "Authorization: Bearer your-token" \
+  -H "Content-Type: application/json" \
+  -d '{"maxPlayers":4,"matchData":{"map":"arena"},"users":{"p1":{"deck":[1,2,3]}}}'
+```
+
+Use returned `id` as `matchId` for Socket.IO query string or UTP handshake payload.
+
+---
+
+## Match access (open / password / token)
+
+When creating an instance, `matchAccess` selects how clients prove they may join.
+
+| Mode | Admin body | Socket.IO client | UTP client |
+|------|------------|------------------|------------|
+| `open` | Default | Only `matchId` (+ `userId`) in query | Handshake JSON from `Payload` |
+| `password` | `matchPassword` | Query `matchPassword` | Handshake JSON field `matchPassword` |
+| `token` | `allowedMatchTokens: ["..."]` | Query `matchToken` | Handshake JSON field `matchToken` |
+
+The server compares secrets using a constant-time hash where applicable (see `match-access.ts` / `MatchAccessHandshake.cs`).
+
+---
+
+## Match finish & session APIs
+
+### `on-finish` reasons (`InputSyncerFinishReasons`)
+
+Common `reason` strings on `OnMatchFinishedWithReason`:
+
+| Constant | Value |
+|----------|--------|
+| `Completed` | `completed` |
+| `AllDisconnected` | `all_disconnected` |
+| `InsufficientPlayers` | `insufficient_players` |
+| `AbandonTimeout` | `abandon_timeout` |
+| `MaxInstanceLifetime` | `max_instance_lifetime` |
+
+### Client methods
+
+- **`SendUserFinish()`** — Emits `user-finish`. When `QuorumUserFinishEndsMatch` is true, the match can end after all joined players signal.
+- **`SendPlayerSessionFinish(object data)`** — Emits `player-session-finish` with optional payload; triggers `on-player-session-finish` (broadcast controlled by `SessionFinishBroadcast`). Payload size is capped by `SessionFinishMaxPayloadBytes`.
+- **`OnPlayerSessionFinish`** — `(userId, data)` per event.
+
+Configure related behavior via env vars / `InputSyncerServerOptions`: `QuorumUserFinishEndsMatch`, `AbandonMatchTimeoutSeconds`, `SessionFinishMaxPayloadBytes`, `SessionFinishBroadcast`, `RejectInputAfterSessionFinish`.
 
 ---
 
 ## SyncSimulation (ECS)
 
-The **SyncSimulation** assembly (`com.unity.entities` 1.4.5+) builds a **simulation-only** ECS world on top of `InputSyncerState`. It does **not** drive GameObjects or rendering; presentation reads state from your own code.
+The **SyncSimulation** assembly builds a **simulation-only** ECS world on top of `InputSyncerState`. It does not drive GameObjects or rendering.
 
 ### Responsibilities
 
-- **Lockstep ingest** — Advances the authoritative step cursor whenever `InputSyncerState.HasStep(n)` allows it.
-- **Local prediction** — When `SyncSimulationOptions.MaxPredictionSteps > 0`, simulates ahead of the latest authoritative step. Remote players’ inputs are **carried** from the last authoritative step (repeat last frame’s payloads); document and tune this for your game.
-- **Continuous vs discrete local input** — Call `InputTimeline.SetContinuousLocalSample` for held axes/buttons (re-applied each predicted step). Call `InputTimeline.EnqueueDiscreteLocalForStep(step, input)` for one-shot actions on an exact future step.
-- **Rollback** — Registers blittable `IComponentData` types with `SyncSimulationHost.RegisterRollbackComponent<T>()`. Each completed step stores a snapshot; on local misprediction the host restores the snapshot after step `D - 1` and fast-forwards. Entities created via `SyncSimulationHost.CreateSimEntity()` get `RollbackEntityId` and `SpawnedOnStep`; predicted spawns with a spawn step after the restore point are removed during restore.
-- **Determinism** — The framework only guarantees: *same ordered inputs per step ⇒ same simulation outcome* if your systems and numeric types are deterministic. Floating point, `UnityEngine.Random`, `Time`, Burst, and platform differences are your responsibility (fixed-point, integer math, seeded RNG, etc.).
-
-### Per-step data for systems
-
-Before each `SimulationGroup.Update()`, the host fills:
-
-- `SimulationStepState` on the singleton entity (`SimulationSingletonTag`): `CurrentStep`, `SimulationPhase` (`Authoritative` vs `Predicted`).
-- `DynamicBuffer<JsonInputEventElement>` — one element per merged input, JSON text (same shapes as lockstep wire data). Parse with Newtonsoft or your own decoder inside systems (keep parsing on the main thread if you use managed APIs).
-
-Register your game systems with `host.AddSystemToSimulation(host.World.CreateSystemManaged<MySystem>())`, ordered after the built-in `SimulationInputBridgeSystem` (use `[UpdateAfter(typeof(SimulationInputBridgeSystem))]`).
+- **Lockstep ingest** — Advances when `InputSyncerState.HasStep(n)` allows.
+- **Local prediction** — `MaxPredictionSteps > 0` simulates ahead; remote inputs are **carried** from the last authoritative step unless you replace that policy.
+- **Continuous vs discrete local input** — `InputTimeline.SetContinuousLocalSample` vs `EnqueueDiscreteLocalForStep`.
+- **Rollback** — Register blittable `IComponentData` with `RegisterRollbackComponent<T>()`. `CreateSimEntity()` assigns `RollbackEntityId` and `SpawnedOnStep`.
+- **Misprediction checks** — `StepInputHash.ComputeForLocalUser` hashes local-player inputs for comparison after authoritative steps arrive.
+- **Determinism** — Same ordered inputs per step yield the same outcome only if your systems and numerics are deterministic.
 
 ### Full input resync
 
-When `InputSyncerState.AddAllStepInputs` runs (missed-step recovery), call `SyncSimulationHost.AfterFullInputResync()` so the timeline’s authoritative cursor and rollback baseline stay aligned. Then recreate or re-register simulation entities as your game requires.
+When `InputSyncerState.AddAllStepInputs` runs, call `SyncSimulationHost.AfterFullInputResync()` so the timeline and rollback baseline stay aligned.
 
 ### Options (summary)
 
 | Option | Role |
 |--------|------|
-| `LocalUserId` | Used for prediction and misprediction hashing. |
-| `MaxPredictionSteps` | `0` = strict lockstep only. |
-| `MaxRollbackSteps` | Ring buffer depth; must cover worst-case prediction depth. |
-| `MaxSimulateStepsPerTick` | Caps work per `Tick()` call (replay may span multiple frames). |
+| `LocalUserId` | Prediction and hashing identity |
+| `MaxPredictionSteps` | `0` = strict lockstep only |
+| `MaxRollbackSteps` | Snapshot ring depth |
+| `MaxSimulateStepsPerTick` | Caps work per `Tick()` |
 
 ### JSON size limit
 
-Each `JsonInputEventElement` uses `FixedString512Bytes`. Payloads longer than 512 UTF-8 bytes are truncated with a console warning.
+`JsonInputEventElement` uses `FixedString512Bytes`; longer UTF-8 payloads are truncated with a warning.
 
 ---
 
@@ -660,63 +758,50 @@ Each `JsonInputEventElement` uses `FixedString512Bytes`. Payloads longer than 51
 
 **Client SDK**
 
-- Lockstep input synchronization with automatic step tracking
-- Dual transport: Socket.IO (TCP/WebSocket) and UTP (UDP)
-- Reliable and unreliable channel support (UTP)
-- Binary event support for high-performance data (UTP, via `INativeArraySerializable`)
-- JSON event support on both transports
-- Mock mode for offline development and testing
-- Automatic resync on missed steps (`request-all-steps`)
-- Client latency measurement (UTP)
-- Connection lifecycle events (`OnConnected`, `OnDisconnected`, `OnReconnected`, `OnError`)
-- Match start detection (`OnMatchStarted`)
-- Custom event registration (`RegisterOnCustomEvent`)
-- `IDisposable` support for clean resource management
+- Lockstep input sync with automatic step tracking and resync request (`request-all-steps`)
+- Dual transport: Socket.IO and UTP
+- Reliable + unreliable channels and binary events (UTP only)
+- Mock mode
+- Match context callback (`OnMatchContext` / `LastMatchContext`)
+- Match and session finish callbacks (`OnMatchFinishedWithReason`, `OnPlayerSessionFinish`)
+- `SendUserFinish` / `SendPlayerSessionFinish`
+- Custom JSON events (`RegisterOnCustomEvent`), including `content-error` handling
+- Connection lifecycle events
+- `IDisposable` on `InputSyncerClient`
 
-**Server**
+**UTP server**
 
-- UTP-based dedicated server with configurable options
-- Automatic match start when lobby is full
-- Late join support with step history replay
-- Player connection/disconnection tracking
-- Step-based input batching and broadcasting
-- Custom event sending to all players or individual players
-- Server-side simulation support via `OnStepBroadcast` event
-- Match finish detection (all players finished)
-- Heartbeat-based idle client disconnection
+- Dedicated server and multi-instance pool
+- Auto-start, late join, step history, heartbeat disconnect
+- Match access modes (open / password / token) on handshake
+- Admin HTTP API and pool stats
+- Match finish reasons (disconnect, abandon timeout, max lifetime, quorum, etc.)
+- Configurable session-finish payload and broadcast behavior
 
-**Multi-Instance Server**
+**Socket.IO server (NestJS)**
 
-- Server instance pool with automatic port allocation
-- Instance lifecycle management (`Idle → WaitingForPlayers → InMatch → Finished`)
-- Auto-recycle finished instances
-- Idle timeout for automatic instance cleanup
-- Authenticated admin HTTP API (Bearer token)
-- REST endpoints for creating, listing, inspecting, and destroying instances
-- Pool statistics endpoint for monitoring
+- Multi-instance pool with admin API parity
+- Optional multi-worker cluster primary
+- Gateway routing by `matchId`; disconnect clients when instance destroyed
 
-**SyncSimulation (ECS)**
+**SyncSimulation**
 
-- Dedicated Entities world with manual `Tick()`, optional prediction, rollback snapshots for registered components
-- Input timeline merging authoritative lockstep data with local continuous/discrete samples
-- `SpawnedOnStep` / `RollbackEntityId` for culling wrong predicted spawns
+- Dedicated ECS world, manual `Tick()`, prediction, rollback, `StepInputHash`
 
-**Infrastructure**
+**Tooling**
 
-- Environment variable overrides for all configuration
-- Pre-built dedicated server scene (`DedicatedServerScene.unity`)
-- Makefile targets for building and testing
-- Assembly definitions for clean dependency management
+- Makefile targets for tests and server builds
+- Unity Editor window for Socket.IO server lifecycle
+- Assembly definitions for clean dependencies
 
 ### Planned
 
-- **Server-side input validation** — Size limits and schema validation before broadcasting inputs.
-- **Client resync timeout** — Configurable timeout and retry for `request-all-steps` to prevent indefinite hangs.
-- **Match end on disconnect** — Auto-finish match when all players leave instead of waiting for idle timeout.
-- **Admin HTTP rate limiting** — Per-IP request throttling on the admin endpoint.
-- **Driver latency support flag** — `bool SupportsLatency` property on `IClientDriver` for runtime capability checks.
+- **Server-side gameplay input validation** — Stronger size/schema checks on every `input` before broadcast
+- **Client resync timeout** — Retry / fail if `on-all-steps` never arrives
+- **Admin HTTP rate limiting** — Per-IP throttling
+- **Driver capability flag** — e.g. `SupportsLatency` on `IClientDriver`
 
-### Future Features
+### Future features
 
-- **JWT-authenticated instance creation** — Admin provides user IDs and match data when creating an instance. The server generates per-user JWT tokens and returns them. Clients must present their JWT to connect, enabling a secure invitation-based matchmaking flow.
-- **Spectator mode** — Spectators connect to a match and receive step broadcasts (inputs) without sending gameplay inputs. Not counted toward `MaxPlayers`. Optionally can send non-gameplay inputs (cheers, reactions). Configurable `MaxSpectators` with `INPUT_SYNCER_MAX_SPECTATORS` env var.
+- **JWT per match invitation** — Tokens returned from admin create, enforced on connect
+- **Spectator mode** — Read-only step consumers, optional reaction channel, `MaxSpectators`
