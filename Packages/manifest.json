@@ -1,5 +1,6 @@
 {
   "dependencies": {
+    "com.yourorg.unity-input-syncer": "file:com.yourorg.unity-input-syncer",
     "com.github-glitchenzo.nugetforunity": "https://github.com/GlitchEnzo/NuGetForUnity.git?path=/src/NuGetForUnity",
     "com.itisnajim.socketiounity": "https://github.com/itisnajim/SocketIOUnity.git",
     "com.unity.ai.navigation": "2.0.9",

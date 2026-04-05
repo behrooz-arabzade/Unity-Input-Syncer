@@ -225,7 +225,7 @@ public class SocketIOServerWindow : EditorWindow
     // -------------------------
     // Paths
     // -------------------------
-    private string ServerDir => Path.GetFullPath(Path.Combine(Application.dataPath, "UnityInputSyncerSocketIOServer"));
+    private string ServerDir => Path.GetFullPath(Path.Combine(Application.dataPath, "..", "Servers", "UnityInputSyncerSocketIOServer"));
 
     [MenuItem("Window/Input Syncer/Socket.IO Server")]
     public static void ShowWindow()
@@ -357,7 +357,7 @@ public class SocketIOServerWindow : EditorWindow
             int pid = s_sharedServerProcess.Id;
             AppendConsole(
                 $"[Editor] Reattached to Socket.IO server after domain reload (PID {pid}). " +
-                "Console history was restored; new Node output is tailed from Assets/UnityInputSyncerSocketIOServer/.unity-editor-server-console.log (rebuild server after pulling latest).");
+                "Console history was restored; new Node output is tailed from Servers/UnityInputSyncerSocketIOServer/.unity-editor-server-console.log (rebuild server after pulling latest).");
         }
 
         Repaint();
@@ -649,7 +649,7 @@ public class SocketIOServerWindow : EditorWindow
     {
         string logPath = Path.Combine(ServerDir, ".unity-editor-server-console.log");
         var sb = new StringBuilder();
-        sb.AppendLine("# From project folder Assets/UnityInputSyncerSocketIOServer");
+        sb.AppendLine("# From repository folder Servers/UnityInputSyncerSocketIOServer");
         sb.AppendLine($"cd \"{ServerDir}\"");
         sb.AppendLine();
         sb.AppendLine("# Required / common options (should match this window; remote host: set API base URL for monitoring):");

@@ -1,0 +1,26 @@
+{
+  "name": "com.yourorg.unity-input-syncer",
+  "version": "1.0.0",
+  "displayName": "Unity Input Syncer",
+  "description": "Deterministic multiplayer input synchronization for Unity: lockstep steps, UTP and Socket.IO transports, optional UTP headless server and ECS helpers.",
+  "unity": "6000.3",
+  "documentationUrl": "https://github.com/yourorg/Unity-Input-Syncer/blob/main/DOCUMENTATION.md",
+  "dependencies": {
+    "com.unity.transport": "2.6.0",
+    "com.unity.nuget.newtonsoft-json": "3.2.2",
+    "com.itisnajim.socketiounity": "https://github.com/itisnajim/SocketIOUnity.git",
+    "com.unity.entities": "1.4.5"
+  },
+  "samples": [
+    {
+      "displayName": "Client examples",
+      "description": "Driver MonoBehaviours, Tic Tac Toe sample, and server-simulation client code.",
+      "path": "Samples~/ClientExamples"
+    },
+    {
+      "displayName": "UTP server examples",
+      "description": "In-scene server setup and server-side simulation sample scripts.",
+      "path": "Samples~/ServerExamples"
+    }
+  ]
+}
