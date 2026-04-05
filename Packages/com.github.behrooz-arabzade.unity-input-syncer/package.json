@@ -1,10 +1,10 @@
 {
-  "name": "com.yourorg.unity-input-syncer",
+  "name": "com.github.behrooz-arabzade.unity-input-syncer",
   "version": "1.0.0",
   "displayName": "Unity Input Syncer",
   "description": "Deterministic multiplayer input synchronization for Unity: lockstep steps, UTP and Socket.IO transports, optional UTP headless server and ECS helpers.",
   "unity": "6000.3",
-  "documentationUrl": "https://github.com/yourorg/Unity-Input-Syncer/blob/main/DOCUMENTATION.md",
+  "documentationUrl": "https://github.com/behrooz-arabzade/Unity-Input-Syncer/blob/main/DOCUMENTATION.md",
   "dependencies": {
     "com.unity.transport": "2.6.0",
     "com.unity.nuget.newtonsoft-json": "3.2.2",

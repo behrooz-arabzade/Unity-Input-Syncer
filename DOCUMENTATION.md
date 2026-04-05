@@ -25,7 +25,7 @@ Unity Input Syncer provides a client-side SDK and server components for synchron
 ### Key Highlights
 
 - **Dual transport support** — Connect via Socket.IO (TCP/WebSocket) or Unity Transport Package (UDP) with a single unified API.
-- **Reference Socket.IO server** — A NestJS app under `Assets/UnityInputSyncerSocketIOServer/` implements the same match pool + admin API as the UTP multi-instance server (optional single-process or multi-worker cluster).
+- **Reference Socket.IO server** — A NestJS app under `Servers/UnityInputSyncerSocketIOServer/` (repository root, not Unity `Assets/`) implements the same match pool + admin API as the UTP multi-instance server (optional single-process or multi-worker cluster).
 - **Dedicated server builds** — Ship headless UTP servers from pre-configured Unity scenes, configurable via environment variables.
 - **Multi-instance server pool (UTP)** — Host multiple match instances on one machine with automatic port allocation and lifecycle management.
 - **Admin HTTP API** — Create, monitor, and destroy match instances via authenticated REST endpoints (UTP pool and NestJS server).
@@ -68,7 +68,7 @@ Game simulation still runs on clients in the default model; the server only sync
 
 ### Namespace Breakdown
 
-The codebase is organized under `Assets/`:
+The **library** assemblies ship inside the UPM package folder `Packages/com.github.behrooz-arabzade.unity-input-syncer/`. This repository also keeps tests and template assets under `Assets/`.
 
 **UnityInputSyncerCore** — Shared networking and utility layer.
 
@@ -88,7 +88,7 @@ The codebase is organized under `Assets/`:
 - `InputSyncerState` — Tracks received steps, detects missed steps, triggers resync (`request-all-steps`).
 - `BaseInputData` — Abstract base class for custom input types (JSON-shaped on the wire).
 
-**SyncSimulation** — Optional ECS layer (`Assets/SyncSimulation/`) on top of `InputSyncerClient`.
+**SyncSimulation** — Optional ECS layer in the package (`SyncSimulation/`) on top of `InputSyncerClient`.
 
 - `SyncSimulationHost` — Dedicated `Unity.Entities` world, lockstep ingest, optional prediction, rollback snapshots, manual `Tick()`.
 - `InputTimeline` — Merges authoritative steps with predicted local input.
@@ -103,7 +103,7 @@ The codebase is organized under `Assets/`:
 - `AdminController` — REST handler shared contract with NestJS admin routes.
 - `ServerInstance` — Wraps a server with lifecycle state (`Idle` → `WaitingForPlayers` → `InMatch` → `Finished`).
 
-**UnityInputSyncerSocketIOServer** — Reference NestJS + Socket.IO server (`package.json` at repo path above).
+**UnityInputSyncerSocketIOServer** — Reference NestJS + Socket.IO server (`Servers/UnityInputSyncerSocketIOServer/package.json`).
 
 - `MatchGateway` — WebSocket gateway on path `/match-gateway`; routes sockets to pool instances by `matchId` query.
 - `InputSyncerPoolService` — Instance pool (mirrors UTP pool semantics).
@@ -171,12 +171,12 @@ Event names are defined in `InputSyncerEvents` (C#) and mirrored in `input-synce
 
 ## Socket.IO server (NestJS)
 
-The folder `Assets/UnityInputSyncerSocketIOServer/` contains a **reference** multi-match server using Socket.IO 4.x and NestJS 11. It is intended to match the **behavior and admin API** of the Unity UTP pool so you can prototype or ship without a Unity headless build.
+The folder `Servers/UnityInputSyncerSocketIOServer/` at the **repository root** contains a **reference** multi-match server using Socket.IO 4.x and NestJS 11. It is intended to match the **behavior and admin API** of the Unity UTP pool so you can prototype or ship without a Unity headless build.
 
 ### Install and run
 
 ```bash
-cd Assets/UnityInputSyncerSocketIOServer
+cd Servers/UnityInputSyncerSocketIOServer
 npm ci
 npm run build
 npm run start:prod
@@ -193,7 +193,7 @@ On boot, HTTP (including admin) and WebSocket share that port. Logs also mention
 
 ### Unity editor integration
 
-Use **Socket.IO Server** in the Unity Editor (see `Assets/Editor/SocketIOServerWindow.cs`) to build/start the Nest app, optionally enable **multi-core cluster** mode, and inspect pool/instance admin responses without leaving the editor.
+Use **Socket.IO Server** in the Unity Editor (implemented in the package at `Packages/com.github.behrooz-arabzade.unity-input-syncer/Editor/SocketIOServerWindow.cs`) to build/start the Nest app, optionally enable **multi-core cluster** mode, and inspect pool/instance admin responses without leaving the editor.
 
 ### Environment variables (NestJS `AppModule`)
 
@@ -271,13 +271,25 @@ Optional test hooks on `SocketIODriverOptions`: `FakeLatency`, `ConnectDelayMs`,
 
 - **Unity 6** (6000.3.0f1 or later)
 - **Node.js 18+** (for the NestJS Socket.IO server only)
-- Packages resolve via Unity Package Manager and NuGet (`Assets/packages.config`)
+- **Unity:** runtime dependencies are declared in the package `package.json` and resolved by the Unity Package Manager. This template project may also use NuGetForUnity (`Assets/packages.config`) for extras.
 
 ### Installation
 
-1. Clone or copy the repository into your Unity project.
-2. Open the project in Unity 6.
-3. Reference assemblies: `UnityInputSyncerClient` for the SDK; `UnityInputSyncerUTPServer` for server components; `SyncSimulation` for ECS helpers.
+**Consumers (other Unity projects)** — Add a Git dependency to your `Packages/manifest.json`. The `?path=` segment must point at the folder that contains `package.json`. Pin a **Git tag** or **commit SHA** (after `#`) so upgrades are explicit; keep tags aligned with the `version` field in that `package.json` (for example tag `1.0.0` for package version `1.0.0`):
+
+```json
+"com.github.behrooz-arabzade.unity-input-syncer": "https://github.com/behrooz-arabzade/Unity-Input-Syncer.git?path=/Packages/com.github.behrooz-arabzade.unity-input-syncer#1.0.0"
+```
+
+**This repository (development)** — Uses the embedded package entry `"com.github.behrooz-arabzade.unity-input-syncer": "file:com.github.behrooz-arabzade.unity-input-syncer"` in `Packages/manifest.json`.
+
+**Assemblies** — Reference `UnityInputSyncerClient` for the SDK; `UnityInputSyncerUTPServer` for UTP server components; `SyncSimulation` for optional ECS helpers.
+
+**Samples** — Optional driver examples, Tic Tac Toe, and server sample scripts live under `Samples~` in the package. Import them from **Window → Package Manager** → **Unity Input Syncer** → **Samples** (they are not part of your project until imported).
+
+### Package footprint (future modular packages)
+
+The current single package always resolves **Socket.IO** (`com.itisnajim.socketiounity`) because `UnityInputSyncerClient` references `SocketIOUnityAssembly`, and **Entities** because `SyncSimulation` is included. UTP-only or non-DOTS games still pull those dependencies. Splitting Socket.IO into an optional assembly and/or shipping ECS helpers as a second UPM package is possible but not implemented yet.
 
 ### Quick Start: Mock Mode (No Server)
 
@@ -297,7 +309,7 @@ client.JoinMatch("player-1");
 
 ### Quick Start: UTP Dedicated Server
 
-1. Open `Assets/Scenes/DedicatedServerScene.unity` (contains `DedicatedServerBootstrap`).
+1. Open `Packages/com.github.behrooz-arabzade.unity-input-syncer/Scenes/DedicatedServerScene.unity` (contains `DedicatedServerBootstrap`).
 2. Build: `make build-server` → `Builds/Server/`.
 3. Connect:
 
@@ -315,7 +327,7 @@ client.JoinMatch("player-1");
 
 ### Quick Start: Socket.IO (NestJS)
 
-1. Build and run the Nest server (`npm run start:prod` in `Assets/UnityInputSyncerSocketIOServer`).
+1. Build and run the Nest server (`npm run start:prod` in `Servers/UnityInputSyncerSocketIOServer`).
 2. Create an instance via admin API or use a known `matchId` if you run a single static config.
 3. Use `SocketIODriver` with `Payload` containing at least `matchId` and `userId`.
 
@@ -329,7 +341,7 @@ make build-server       # Build single-instance UTP dedicated server
 make build-multi-server # Build multi-instance UTP server (see note below)
 ```
 
-**Multi-instance Unity build:** `BuildServer.cs` expects `Assets/Scenes/MultiInstanceServerScene.unity`. That scene is not always present in the tree; if `make build-multi-server` fails, create a scene with a single root object and `MultiInstanceServerBootstrap`, save it at that path, then rebuild.
+**Multi-instance Unity build:** `BuildServer.cs` expects `Packages/com.github.behrooz-arabzade.unity-input-syncer/Scenes/MultiInstanceServerScene.unity`. That scene is not always present in the tree; if `make build-multi-server` fails, create a scene with a single root object and `MultiInstanceServerBootstrap`, save it at that path, then rebuild.
 
 ### Environment variable configuration
 

@@ -30,7 +30,7 @@ Unity Input Syncer is a Unity 6 (6000.3.0f1) library for deterministic multiplay
 
 ## Architecture
 
-The codebase is split into two namespaces under `Assets/`:
+The **shippable library** is a Unity Package Manager package under `Packages/com.github.behrooz-arabzade.unity-input-syncer/` (embedded in this repo via `file:` in `Packages/manifest.json`). Tests and template content remain under `Assets/`.
 
 ### UnityInputSyncerCore
 
@@ -52,7 +52,7 @@ Client SDK for game code to consume:
 - **InputSyncerClient** — Main entry point. Wraps a driver, manages step-based input collection, supports a **mock mode** (local-only tick loop, no server needed) for offline testing. Fires `OnMatchStarted` once steps begin arriving.
 - **InputSyncerState** — Tracks received steps as an ordered dictionary. Detects missed steps and triggers a full resync (`request-all-steps`). Consumers call `HasStep(n)` / `GetInputsForStep(n)` to consume inputs deterministically.
 - **BaseInputData** — Abstract base for all input types. Uses Newtonsoft.Json (`JObject`) for serialization. Subclass it with a unique `type` string to define game-specific inputs.
-- **Examples/** — `SocketIODriverExample` and `UTPSocketDriverExample` show how to wire up each driver in a MonoBehaviour.
+- **Samples** — Driver examples and Tic Tac Toe ship as optional UPM samples under `Samples~/ClientExamples` and `Samples~/ServerExamples` (import via Package Manager).
 
 ### Data Flow
 
@@ -73,11 +73,15 @@ Client SDK for game code to consume:
 
 This is a Unity project — open in Unity 6 (6000.3.0f1+). There is no standalone build system or CLI test runner.
 
+**Consuming as a library:** Other Unity projects install `com.github.behrooz-arabzade.unity-input-syncer` from Git using `?path=/Packages/com.github.behrooz-arabzade.unity-input-syncer` and a `#tag` or commit SHA (see **Getting Started → Installation** in `DOCUMENTATION.md`). This repo uses `file:com.github.behrooz-arabzade.unity-input-syncer` in `Packages/manifest.json` for local development.
+
 Assembly definitions (`.asmdef`) are used for each source folder and for tests:
 
-- `Assets/UnityInputSyncerCore/UnityInputSyncerCore.asmdef`
-- `Assets/UnityInputSyncerClient/UnityInputSyncerClient.asmdef`
-- `Assets/UnityInputSyncerUTPServer/UnityInputSyncerUTPServer.asmdef`
+- `Packages/com.github.behrooz-arabzade.unity-input-syncer/UnityInputSyncerCore/UnityInputSyncerCore.asmdef`
+- `Packages/com.github.behrooz-arabzade.unity-input-syncer/UnityInputSyncerClient/UnityInputSyncerClient.asmdef`
+- `Packages/com.github.behrooz-arabzade.unity-input-syncer/UnityInputSyncerUTPServer/UnityInputSyncerUTPServer.asmdef`
+- `Packages/com.github.behrooz-arabzade.unity-input-syncer/SyncSimulation/SyncSimulation.asmdef`
+- `Packages/com.github.behrooz-arabzade.unity-input-syncer/Editor/UnityInputSyncer.Editor.asmdef` — Editor tools (`BuildServer`, Socket.IO window)
 - `Assets/Tests/EditMode/EditModeTests.asmdef` — Edit Mode tests (editor only)
 - `Assets/Tests/PlayMode/PlayModeTests.asmdef` — Play Mode tests
 
@@ -98,7 +102,7 @@ Or via **Window > General > Test Runner** in the Unity Editor.
 
 ## Dedicated Server
 
-A ready-made server scene is at `Assets/Scenes/DedicatedServerScene.unity`. It contains a single GameObject with `DedicatedServerBootstrap`, which starts `InputSyncerServer` automatically.
+A ready-made server scene is at `Packages/com.github.behrooz-arabzade.unity-input-syncer/Scenes/DedicatedServerScene.unity`. It contains a single GameObject with `DedicatedServerBootstrap`, which starts `InputSyncerServer` automatically.
 
 **Building:** `make build-server` produces a headless macOS server build in `Builds/Server/`.
 
@@ -123,7 +127,7 @@ Bool values accept `true`/`false` or `1`/`0`. The `Server` property on `Dedicate
 
 ## Socket.IO server (NestJS) — single process vs multi-core cluster
 
-The TypeScript server under `Assets/UnityInputSyncerSocketIOServer/` can run in two modes:
+The TypeScript server under `Servers/UnityInputSyncerSocketIOServer/` (repository root) can run in two modes:
 
 | Mode | Entry | Behavior |
 |------|--------|----------|
@@ -153,7 +157,7 @@ Workers receive a generated `INPUT_SYNCER_INTERNAL_SECRET` for `GET /api/interna
 
 ### Priority: Critical
 
-- [ ] **Create `MultiInstanceServerScene.unity`** — The scene referenced by `BuildServer.cs` does not exist. Without it, `make build-multi-server` fails and the multi-instance server cannot be built. Must be created manually in Unity Editor with a single GameObject containing the `MultiInstanceServerBootstrap` component. **Files:** `Assets/Scenes/MultiInstanceServerScene.unity`.
+- [ ] **Create `MultiInstanceServerScene.unity`** — The scene referenced by `BuildServer.cs` does not exist. Without it, `make build-multi-server` fails and the multi-instance server cannot be built. Must be created manually in Unity Editor with a single GameObject containing the `MultiInstanceServerBootstrap` component. **Files:** `Packages/com.github.behrooz-arabzade.unity-input-syncer/Scenes/MultiInstanceServerScene.unity`.
 
 ### Priority: High
 

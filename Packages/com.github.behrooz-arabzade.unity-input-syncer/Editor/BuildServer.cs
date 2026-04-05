@@ -3,8 +3,8 @@ using UnityEditor.Build.Reporting;
 
 public static class BuildServer
 {
-    private const string DedicatedServerScene = "Packages/com.yourorg.unity-input-syncer/Scenes/DedicatedServerScene.unity";
-    private const string MultiInstanceServerScene = "Packages/com.yourorg.unity-input-syncer/Scenes/MultiInstanceServerScene.unity";
+    private const string DedicatedServerScene = "Packages/com.github.behrooz-arabzade.unity-input-syncer/Scenes/DedicatedServerScene.unity";
+    private const string MultiInstanceServerScene = "Packages/com.github.behrooz-arabzade.unity-input-syncer/Scenes/MultiInstanceServerScene.unity";
     private const string OutputPath = "Builds/Server";
 
     [MenuItem("Build/Dedicated Server")]
