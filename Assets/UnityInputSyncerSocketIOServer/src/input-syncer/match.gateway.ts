@@ -12,6 +12,7 @@ import { Logger } from '@nestjs/common';
 import { Server, Socket } from 'socket.io';
 import { InputSyncerPoolService } from './pool.service';
 import { InputSyncerEvents } from './input-syncer-events';
+import { checkSocketMatchAccess, firstQueryString } from './match-access';
 
 /**
  * SocketIOUnity serializes Emit args as JSON arrays. Unwrap nested `[[{...}]]` down to a plain object.
@@ -28,17 +29,6 @@ function normalizeMessageBody(data: unknown): Record<string, unknown> | undefine
     !Array.isArray(current)
   ) {
     return current as Record<string, unknown>;
-  }
-  return undefined;
-}
-
-/** Socket.IO query values are often `string | string[]`. */
-function firstQueryString(
-  value: string | string[] | undefined,
-): string | undefined {
-  if (typeof value === 'string' && value.length > 0) return value;
-  if (Array.isArray(value) && value.length > 0 && typeof value[0] === 'string') {
-    return value[0].length > 0 ? value[0] : undefined;
   }
   return undefined;
 }
@@ -172,6 +162,24 @@ export class MatchGateway
       socket.emit(InputSyncerEvents.INPUT_SYNCER_CONTENT_ERROR, {
         reason: 'instance-not-found',
         message: `Match instance '${matchId}' does not exist`,
+      });
+      socket.disconnect(true);
+      return;
+    }
+
+    const access = checkSocketMatchAccess(
+      instance.server.options.matchAccess,
+      instance.server.options.matchPassword,
+      instance.server.options.allowedMatchTokens,
+      socket.handshake.query,
+    );
+    if (!access.ok) {
+      this.logger.warn(
+        `Socket ${socket.id} match access denied for ${matchId} (${access.reason})`,
+      );
+      socket.emit(InputSyncerEvents.INPUT_SYNCER_CONTENT_ERROR, {
+        reason: access.reason,
+        message: access.message,
       });
       socket.disconnect(true);
       return;

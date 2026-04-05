@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using UnityInputSyncerCore;
 
 namespace UnityInputSyncerUTPServer
@@ -30,6 +31,14 @@ namespace UnityInputSyncerUTPServer
 
         /// <summary>Pool instance id for reward hooks; optional for single dedicated server.</summary>
         public string MatchInstanceId = "";
+
+        public MatchAccessMode MatchAccess = MatchAccessMode.Open;
+
+        /// <summary>Plaintext match password (in-memory only); used when <see cref="MatchAccess"/> is Password.</summary>
+        public string MatchPassword = "";
+
+        /// <summary>Allowed join tokens when <see cref="MatchAccess"/> is Token.</summary>
+        public HashSet<string> AllowedMatchTokens;
 
         public RewardOutcomeDeliveryMode RewardOutcomeDelivery = RewardOutcomeDeliveryMode.ClientToAdmin;
 

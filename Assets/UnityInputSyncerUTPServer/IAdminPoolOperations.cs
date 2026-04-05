@@ -16,6 +16,8 @@ namespace UnityInputSyncerUTPServer
         public DateTime CreatedAt;
         public int CurrentStep;
         public double UptimeSeconds;
+        public string MatchAccess;
+        public int AllowedMatchTokenCount;
     }
 
     public class AdminCreateInstanceRequest
@@ -25,6 +27,9 @@ namespace UnityInputSyncerUTPServer
         public bool? AutoStartWhenFull;
         public bool? AllowLateJoin;
         public bool? SendStepHistoryOnLateJoin;
+        public string MatchAccess;
+        public string MatchPassword;
+        public List<string> AllowedMatchTokens;
     }
 
     public class AdminResourceUsage

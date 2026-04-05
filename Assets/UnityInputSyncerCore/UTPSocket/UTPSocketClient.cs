@@ -3,6 +3,7 @@ using System.Buffers;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Text;
+using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using Unity.Collections;
 using Unity.Networking.Transport;
@@ -91,7 +92,7 @@ namespace UnityInputSyncerCore.UTPSocket
                 switch (evt)
                 {
                     case NetworkEvent.Type.Connect:
-                        SendHandShake(default);
+                        SendConnectHandshake();
                         break;
 
                     case NetworkEvent.Type.Data:
@@ -322,6 +323,22 @@ namespace UnityInputSyncerCore.UTPSocket
         public void SendHandShake(NativeArray<byte> data)
         {
             SendInternal(UTPSocketDataType.Handshake, default, data, true);
+        }
+
+        void SendConnectHandshake()
+        {
+            string json = Payload.Count == 0 ? "{}" : JsonConvert.SerializeObject(Payload);
+            byte[] utf8 = Encoding.UTF8.GetBytes(json);
+            var na = new NativeArray<byte>(utf8.Length, Allocator.Temp);
+            try
+            {
+                na.CopyFrom(utf8);
+                SendHandShake(na);
+            }
+            finally
+            {
+                na.Dispose();
+            }
         }
 
         private void SendHeartbeatPing()

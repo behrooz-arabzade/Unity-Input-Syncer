@@ -34,6 +34,7 @@ namespace UnityInputSyncerUTPServer
                         overrides.AllowLateJoin = request.AllowLateJoin.Value;
                     if (request.SendStepHistoryOnLateJoin.HasValue)
                         overrides.SendStepHistoryOnLateJoin = request.SendStepHistoryOnLateJoin.Value;
+                    MatchAccessCreateValidation.MapToOptions(request, overrides);
                 }
 
                 var instance = pool.CreateInstance(overrides);
@@ -120,6 +121,9 @@ namespace UnityInputSyncerUTPServer
                 CreatedAt = instance.CreatedAt,
                 CurrentStep = instance.Server.GetState().CurrentStep,
                 UptimeSeconds = (DateTime.UtcNow - instance.CreatedAt).TotalSeconds,
+                MatchAccess = MatchAccessCreateValidation.AccessModeToApiString(
+                    instance.Server.GetOptions().MatchAccess),
+                AllowedMatchTokenCount = instance.Server.GetOptions().AllowedMatchTokens?.Count ?? 0,
             };
         }
     }

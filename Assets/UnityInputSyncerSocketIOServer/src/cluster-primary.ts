@@ -24,6 +24,8 @@ type AdminInstanceInfo = {
   createdAt: string;
   currentStep: number;
   uptimeSeconds: number;
+  matchAccess: 'open' | 'password' | 'token';
+  allowedMatchTokenCount: number;
 };
 
 type AdminPoolStats = {

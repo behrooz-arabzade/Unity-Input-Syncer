@@ -50,11 +50,14 @@ namespace UnityInputSyncerUTPServer
             }
             else
             {
-                Socket = new UTPSocketServer(new UTPSocketServerOptions
+                var utpOptions = new UTPSocketServerOptions
                 {
                     Port = Options.Port,
                     HeartbeatTimeout = Options.HeartbeatTimeout,
-                });
+                    OnHandshakeValidation = (connectionId, data) =>
+                        MatchAccessHandshake.Validate(Options, data),
+                };
+                Socket = new UTPSocketServer(utpOptions);
             }
 
             RegisterSocketEvents();
@@ -62,6 +65,8 @@ namespace UnityInputSyncerUTPServer
         }
 
         public string LastFinishReason { get; private set; }
+
+        public InputSyncerServerOptions GetOptions() => Options;
 
         public void Start()
         {

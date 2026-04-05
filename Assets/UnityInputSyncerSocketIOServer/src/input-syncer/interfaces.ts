@@ -17,6 +17,10 @@ export interface InputSyncerServerOptions {
   rejectInputAfterSessionFinish?: boolean;
   abandonMatchTimeoutSeconds?: number;
   matchInstanceId?: string;
+  /** Default `open`. */
+  matchAccess?: 'open' | 'password' | 'token';
+  matchPassword?: string;
+  allowedMatchTokens?: string[];
   rewardOutcomeDelivery?: RewardOutcomeDeliveryMode;
   onRewardHookPerUser?: (payload: RewardPerUserHookPayload) => void;
   onRewardHookMatch?: (payload: RewardMatchHookPayload) => void;

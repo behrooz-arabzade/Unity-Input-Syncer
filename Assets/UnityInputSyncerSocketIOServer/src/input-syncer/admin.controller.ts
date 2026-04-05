@@ -21,6 +21,7 @@ import {
   AdminPoolStats,
   ServerInstanceState,
 } from './types';
+import { validateAdminMatchAccess } from './match-access';
 
 /** Only pass fields present on the body so `{}` does not wipe module defaults. */
 function overridesFromCreateBody(
@@ -36,6 +37,11 @@ function overridesFromCreateBody(
   if (body.allowLateJoin !== undefined) o.allowLateJoin = body.allowLateJoin;
   if (body.sendStepHistoryOnLateJoin !== undefined)
     o.sendStepHistoryOnLateJoin = body.sendStepHistoryOnLateJoin;
+  if (body.matchAccess !== undefined)
+    o.matchAccess = body.matchAccess as 'open' | 'password' | 'token';
+  if (body.matchPassword !== undefined) o.matchPassword = body.matchPassword;
+  if (body.allowedMatchTokens !== undefined)
+    o.allowedMatchTokens = body.allowedMatchTokens;
   return Object.keys(o).length > 0 ? o : undefined;
 }
 
@@ -57,6 +63,8 @@ export class AdminController {
       body.stepIntervalSeconds <= 0
     )
       errors.push('stepIntervalSeconds must be > 0');
+
+    errors.push(...validateAdminMatchAccess(body));
 
     if (errors.length > 0) {
       throw new HttpException(
@@ -136,6 +144,7 @@ export class AdminController {
 }
 
 function mapToInfo(instance: ServerInstance): AdminInstanceInfo {
+  const opts = instance.server.options;
   return {
     id: instance.id,
     state: instance.state,
@@ -146,5 +155,7 @@ function mapToInfo(instance: ServerInstance): AdminInstanceInfo {
     createdAt: instance.createdAt.toISOString(),
     currentStep: instance.server.currentStep,
     uptimeSeconds: (Date.now() - instance.createdAt.getTime()) / 1000,
+    matchAccess: opts.matchAccess,
+    allowedMatchTokenCount: opts.allowedMatchTokens.size,
   };
 }

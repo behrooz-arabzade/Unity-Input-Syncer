@@ -26,6 +26,8 @@ export interface AdminInstanceInfo {
   createdAt: string;
   currentStep: number;
   uptimeSeconds: number;
+  matchAccess: 'open' | 'password' | 'token';
+  allowedMatchTokenCount: number;
 }
 
 export interface AdminCreateInstanceRequest {
@@ -34,6 +36,9 @@ export interface AdminCreateInstanceRequest {
   autoStartWhenFull?: boolean;
   allowLateJoin?: boolean;
   sendStepHistoryOnLateJoin?: boolean;
+  matchAccess?: string;
+  matchPassword?: string;
+  allowedMatchTokens?: string[];
 }
 
 export interface AdminResourceUsage {

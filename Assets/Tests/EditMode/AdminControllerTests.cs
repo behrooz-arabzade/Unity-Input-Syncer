@@ -186,6 +186,72 @@ namespace Tests.EditMode
             Assert.IsNotNull(json["error"]);
         }
 
+        [Test]
+        public async Task PostInstances_MatchAccessInvalid_Returns400()
+        {
+            var ctrl = CreateController();
+            var body = "{\"matchAccess\":\"nope\"}";
+            var response = await ctrl.HandleRequestAsync("POST", "/api/instances", body);
+
+            Assert.AreEqual(400, response.StatusCode);
+        }
+
+        [Test]
+        public async Task PostInstances_PasswordModeWithoutPassword_Returns400()
+        {
+            var ctrl = CreateController();
+            var body = "{\"matchAccess\":\"password\"}";
+            var response = await ctrl.HandleRequestAsync("POST", "/api/instances", body);
+
+            Assert.AreEqual(400, response.StatusCode);
+        }
+
+        [Test]
+        public async Task PostInstances_OpenWithPassword_Returns400()
+        {
+            var ctrl = CreateController();
+            var body = "{\"matchAccess\":\"open\",\"matchPassword\":\"x\"}";
+            var response = await ctrl.HandleRequestAsync("POST", "/api/instances", body);
+
+            Assert.AreEqual(400, response.StatusCode);
+        }
+
+        [Test]
+        public async Task PostInstances_TokenModeWithoutTokens_Returns400()
+        {
+            var ctrl = CreateController();
+            var body = "{\"matchAccess\":\"token\"}";
+            var response = await ctrl.HandleRequestAsync("POST", "/api/instances", body);
+
+            Assert.AreEqual(400, response.StatusCode);
+        }
+
+        [Test]
+        public async Task PostInstances_PasswordMode_Returns201()
+        {
+            var ctrl = CreateController();
+            var body = "{\"matchAccess\":\"password\",\"matchPassword\":\"p\"}";
+            var response = await ctrl.HandleRequestAsync("POST", "/api/instances", body);
+
+            Assert.AreEqual(201, response.StatusCode);
+            Assert.IsNotNull(mockPool.LastCreateRequest);
+            Assert.AreEqual("password", mockPool.LastCreateRequest.MatchAccess);
+            Assert.AreEqual("p", mockPool.LastCreateRequest.MatchPassword);
+        }
+
+        [Test]
+        public async Task PostInstances_TokenMode_Returns201()
+        {
+            var ctrl = CreateController();
+            var body = "{\"matchAccess\":\"token\",\"allowedMatchTokens\":[\"a\",\"b\"]}";
+            var response = await ctrl.HandleRequestAsync("POST", "/api/instances", body);
+
+            Assert.AreEqual(201, response.StatusCode);
+            Assert.IsNotNull(mockPool.LastCreateRequest);
+            Assert.AreEqual("token", mockPool.LastCreateRequest.MatchAccess);
+            Assert.AreEqual(2, mockPool.LastCreateRequest.AllowedMatchTokens.Count);
+        }
+
         // =========================================================
         // GET /api/instances
         // =========================================================

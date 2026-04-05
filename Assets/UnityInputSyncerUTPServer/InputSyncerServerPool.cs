@@ -62,6 +62,9 @@ namespace UnityInputSyncerUTPServer
                 OnRewardHookPerUser = o?.OnRewardHookPerUser ?? d.OnRewardHookPerUser,
                 OnRewardHookMatch = o?.OnRewardHookMatch ?? d.OnRewardHookMatch,
                 MatchInstanceId = id,
+                MatchAccess = o?.MatchAccess ?? d.MatchAccess,
+                MatchPassword = o != null ? o.MatchPassword : d.MatchPassword,
+                AllowedMatchTokens = MergeAllowedMatchTokens(o, d),
             };
 
             ISocketServer socket = socketFactory?.Invoke(port);
@@ -262,6 +265,19 @@ namespace UnityInputSyncerUTPServer
         {
             if (disposed)
                 throw new ObjectDisposedException(nameof(InputSyncerServerPool));
+        }
+
+        private static HashSet<string> MergeAllowedMatchTokens(
+            InputSyncerServerOptions o,
+            InputSyncerServerOptions d)
+        {
+            if (o != null && o.AllowedMatchTokens != null && o.AllowedMatchTokens.Count > 0)
+                return new HashSet<string>(o.AllowedMatchTokens, StringComparer.Ordinal);
+            if (o != null)
+                return null;
+            if (d.AllowedMatchTokens != null && d.AllowedMatchTokens.Count > 0)
+                return new HashSet<string>(d.AllowedMatchTokens, StringComparer.Ordinal);
+            return null;
         }
     }
 }

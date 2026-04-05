@@ -38,7 +38,25 @@ namespace Tests.Helpers
                 MatchStarted = false,
                 MatchFinished = false,
                 CreatedAt = DateTime.UtcNow,
+                MatchAccess = "open",
+                AllowedMatchTokenCount = 0,
             };
+            if (request?.AllowedMatchTokens != null && request.AllowedMatchTokens.Count > 0)
+            {
+                info.AllowedMatchTokenCount = new HashSet<string>(request.AllowedMatchTokens).Count;
+                info.MatchAccess = "token";
+            }
+            else if (!string.IsNullOrEmpty(request?.MatchPassword))
+            {
+                info.MatchAccess = "password";
+            }
+            else if (!string.IsNullOrEmpty(request?.MatchAccess))
+            {
+                var m = request.MatchAccess.Trim().ToLowerInvariant();
+                if (m == "password") info.MatchAccess = "password";
+                else if (m == "token") info.MatchAccess = "token";
+                else info.MatchAccess = "open";
+            }
             Instances.Add(info);
             return Task.FromResult(info);
         }

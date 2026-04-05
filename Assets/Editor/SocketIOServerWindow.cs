@@ -4,6 +4,8 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Text;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.Networking;
@@ -204,6 +206,11 @@ public class SocketIOServerWindow : EditorWindow
     private UnityWebRequest activeActionRequest;
     private Vector2 instancesScroll;
     private string pollError;
+
+    /// <summary>0 = open, 1 = password, 2 = token — used when creating an instance from the Monitor tab.</summary>
+    private int createInstanceMatchAccess;
+    private string createInstanceMatchPassword = "";
+    private string createInstanceMatchTokens = "";
 
     private static readonly string[] MainTabNames = { "Setup", "Monitor", "Console" };
     private int mainTab;
@@ -800,6 +807,24 @@ public class SocketIOServerWindow : EditorWindow
         }
 
         EditorGUILayout.Space(10);
+        EditorGUILayout.LabelField("New instance", EditorStyles.miniBoldLabel);
+        createInstanceMatchAccess = EditorGUILayout.Popup(
+            "Match access",
+            createInstanceMatchAccess,
+            new[] { "Open", "Password", "Token" });
+        if (createInstanceMatchAccess == 1)
+            createInstanceMatchPassword = EditorGUILayout.PasswordField(
+                "Match password",
+                createInstanceMatchPassword ?? "");
+        if (createInstanceMatchAccess == 2)
+        {
+            EditorGUILayout.LabelField("Allowed tokens (one per line)", EditorStyles.miniLabel);
+            createInstanceMatchTokens = EditorGUILayout.TextArea(
+                createInstanceMatchTokens ?? "",
+                GUILayout.MinHeight(52f));
+        }
+
+        EditorGUILayout.Space(6);
         EditorGUILayout.BeginHorizontal();
         GUILayout.Label("Instances", EditorStyles.miniBoldLabel);
         GUILayout.FlexibleSpace();
@@ -837,7 +862,8 @@ public class SocketIOServerWindow : EditorWindow
     {
         EditorGUILayout.BeginHorizontal(EditorStyles.toolbar);
         GUILayout.Label("ID", EditorStyles.miniBoldLabel, GUILayout.Width(80));
-        GUILayout.Label("State", EditorStyles.miniBoldLabel, GUILayout.Width(100));
+        GUILayout.Label("State", EditorStyles.miniBoldLabel, GUILayout.Width(72));
+        GUILayout.Label("Access", EditorStyles.miniBoldLabel, GUILayout.Width(52));
         GUILayout.Label("Players", EditorStyles.miniBoldLabel, GUILayout.Width(55));
         GUILayout.Label("Joined", EditorStyles.miniBoldLabel, GUILayout.Width(50));
         GUILayout.Label("Step", EditorStyles.miniBoldLabel, GUILayout.Width(45));
@@ -855,7 +881,9 @@ public class SocketIOServerWindow : EditorWindow
         var idTooltip =
             $"Instance ID (matchId):\n{inst.id}\n\nUse the same Socket.IO server URL/port for all instances; pass this id as matchId (not a different port).";
         GUILayout.Label(new GUIContent(displayId, idTooltip), EditorStyles.miniLabel, GUILayout.Width(80));
-        GUILayout.Label(inst.state, EditorStyles.miniLabel, GUILayout.Width(100));
+        GUILayout.Label(inst.state, EditorStyles.miniLabel, GUILayout.Width(72));
+        string acc = string.IsNullOrEmpty(inst.matchAccess) ? "open" : inst.matchAccess;
+        GUILayout.Label(acc, EditorStyles.miniLabel, GUILayout.Width(52));
         GUILayout.Label(inst.playerCount.ToString(), EditorStyles.miniLabel, GUILayout.Width(55));
         GUILayout.Label(inst.joinedPlayerCount.ToString(), EditorStyles.miniLabel, GUILayout.Width(50));
         GUILayout.Label(inst.currentStep.ToString(), EditorStyles.miniLabel, GUILayout.Width(45));
@@ -1331,6 +1359,46 @@ public class SocketIOServerWindow : EditorWindow
     // ADMIN API ACTIONS
     // -------------------------
 
+    private string BuildCreateInstancePostBody()
+    {
+        var jo = new JObject
+        {
+            ["maxPlayers"] = maxPlayers,
+            ["stepIntervalSeconds"] = stepInterval,
+            ["autoStartWhenFull"] = autoStartWhenFull,
+            ["allowLateJoin"] = allowLateJoin,
+            ["sendStepHistoryOnLateJoin"] = sendHistoryOnLateJoin
+        };
+        switch (createInstanceMatchAccess)
+        {
+            case 0:
+                jo["matchAccess"] = "open";
+                break;
+            case 1:
+                jo["matchAccess"] = "password";
+                jo["matchPassword"] = createInstanceMatchPassword ?? "";
+                break;
+            case 2:
+                jo["matchAccess"] = "token";
+                var arr = new JArray();
+                if (!string.IsNullOrEmpty(createInstanceMatchTokens))
+                {
+                    var lines = createInstanceMatchTokens.Split(
+                        new[] { '\r', '\n' },
+                        StringSplitOptions.RemoveEmptyEntries);
+                    foreach (var line in lines)
+                    {
+                        var t = line.Trim();
+                        if (t.Length > 0)
+                            arr.Add(t);
+                    }
+                }
+                jo["allowedMatchTokens"] = arr;
+                break;
+        }
+        return jo.ToString(Formatting.None);
+    }
+
     private void CreateInstance()
     {
         if (activeActionRequest != null) return;
@@ -1339,14 +1407,7 @@ public class SocketIOServerWindow : EditorWindow
         activeActionRequest = new UnityWebRequest(url, "POST");
         // Must send explicit fields: POST "{}" used to make Nest pass all-undefined overrides and
         // wipe INPUT_SYNCER_* defaults (autoStartWhenFull / maxPlayers), so matches never auto-started.
-        string createBody = JsonUtility.ToJson(new CreateInstanceApiBody
-        {
-            maxPlayers = maxPlayers,
-            stepIntervalSeconds = stepInterval,
-            autoStartWhenFull = autoStartWhenFull,
-            allowLateJoin = allowLateJoin,
-            sendStepHistoryOnLateJoin = sendHistoryOnLateJoin
-        });
+        string createBody = BuildCreateInstancePostBody();
         activeActionRequest.uploadHandler = new UploadHandlerRaw(Encoding.UTF8.GetBytes(createBody));
         activeActionRequest.downloadHandler = new DownloadHandlerBuffer();
         activeActionRequest.SetRequestHeader("Content-Type", "application/json");
@@ -1967,16 +2028,6 @@ public class SocketIOServerWindow : EditorWindow
     // -------------------------
 
     [Serializable]
-    private class CreateInstanceApiBody
-    {
-        public int maxPlayers;
-        public float stepIntervalSeconds;
-        public bool autoStartWhenFull;
-        public bool allowLateJoin;
-        public bool sendStepHistoryOnLateJoin;
-    }
-
-    [Serializable]
     private class InstanceInfo
     {
         public string id;
@@ -1988,6 +2039,8 @@ public class SocketIOServerWindow : EditorWindow
         public bool matchStarted;
         public bool matchFinished;
         public float uptimeSeconds;
+        public string matchAccess;
+        public int allowedMatchTokenCount;
     }
 
     [Serializable]

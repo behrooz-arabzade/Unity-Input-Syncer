@@ -9,6 +9,7 @@ import {
   type RewardPerUserHookPayload,
 } from './reward-delivery';
 import { AllStepInputs, StepInputs } from './types';
+import type { MatchAccessMode } from './match-access';
 
 export type SendToSocketFn = (
   socketId: string,
@@ -28,12 +29,34 @@ type ResolvedServerOptions = {
   rejectInputAfterSessionFinish: boolean;
   abandonMatchTimeoutSeconds: number;
   matchInstanceId: string;
+  matchAccess: MatchAccessMode;
+  matchPassword: string;
+  allowedMatchTokens: Set<string>;
   rewardOutcomeDelivery: RewardOutcomeDeliveryMode;
   onRewardHookPerUser?: (payload: RewardPerUserHookPayload) => void;
   onRewardHookMatch?: (payload: RewardMatchHookPayload) => void;
 };
 
+function resolveMatchAccess(
+  raw: string | undefined,
+): MatchAccessMode {
+  const s = (raw ?? 'open').trim().toLowerCase();
+  if (s === 'password') return 'password';
+  if (s === 'token') return 'token';
+  return 'open';
+}
+
 function resolveOptions(o?: InputSyncerServerOptions): ResolvedServerOptions {
+  const matchAccess = resolveMatchAccess(o?.matchAccess);
+  let matchPassword = '';
+  let allowedMatchTokens = new Set<string>();
+  if (matchAccess === 'password') {
+    matchPassword = o?.matchPassword ?? '';
+  }
+  if (matchAccess === 'token') {
+    allowedMatchTokens = new Set(o?.allowedMatchTokens ?? []);
+  }
+
   return {
     maxPlayers: o?.maxPlayers ?? 2,
     autoStartWhenFull: o?.autoStartWhenFull ?? false,
@@ -46,6 +69,9 @@ function resolveOptions(o?: InputSyncerServerOptions): ResolvedServerOptions {
     rejectInputAfterSessionFinish: o?.rejectInputAfterSessionFinish ?? false,
     abandonMatchTimeoutSeconds: o?.abandonMatchTimeoutSeconds ?? 0,
     matchInstanceId: o?.matchInstanceId ?? '',
+    matchAccess,
+    matchPassword,
+    allowedMatchTokens,
     rewardOutcomeDelivery:
       o?.rewardOutcomeDelivery ?? RewardOutcomeDeliveryMode.ClientToAdmin,
     onRewardHookPerUser: o?.onRewardHookPerUser,
