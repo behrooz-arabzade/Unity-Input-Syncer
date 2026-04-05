@@ -119,6 +119,8 @@ A ready-made server scene is at `Assets/Scenes/DedicatedServerScene.unity`. It c
 
 Bool values accept `true`/`false` or `1`/`0`. The `Server` property on `DedicatedServerBootstrap` is public for server-side simulation access.
 
+**Multi-instance pool (`MultiInstanceServerBootstrap`):** also supports `INPUT_SYNCER_BASE_PORT`, `INPUT_SYNCER_MAX_INSTANCES`, `INPUT_SYNCER_AUTO_RECYCLE`, `INPUT_SYNCER_MAX_INSTANCE_LIFETIME`, and other pool/server options documented in `DOCUMENTATION.md`. For admin API client hints: `INPUT_SYNCER_PUBLIC_HOST` (hostname/IP, no scheme; fills `serverUrl` / `clientConnection.host` as `host:port`). Optional: `INPUT_SYNCER_ADMIN_REQUIRE_MATCH_USER_DATA` — when true, `POST /api/instances` must include non-empty `matchData` and/or `users`.
+
 ## Socket.IO server (NestJS) — single process vs multi-core cluster
 
 The TypeScript server under `Assets/UnityInputSyncerSocketIOServer/` can run in two modes:
@@ -137,6 +139,8 @@ The TypeScript server under `Assets/UnityInputSyncerSocketIOServer/` can run in 
 | `INPUT_SYNCER_BIND` | Used by workers when forked (set to `127.0.0.1` by the primary). For `main.js` alone, optional bind address. |
 
 Workers receive a generated `INPUT_SYNCER_INTERNAL_SECRET` for `GET /api/internal/pool-meta` and `GET /api/internal/instance/:id/exists` (not exposed through the primary’s public port). If a **worker process crashes**, its matches are lost; the primary clears routing for that worker and restarts it after a short delay. The Unity **Socket.IO Server** window can enable “Multi-core cluster” to launch `dist/cluster-primary.js` instead of `dist/main.js`.
+
+**Admin client URL / match payloads:** set `INPUT_SYNCER_PUBLIC_CLIENT_SOCKET_IO_URL` (e.g. `https://game.example.com`) so create-instance responses include `serverUrl` and `clientConnection.socketIoUrl` for Unity clients. Optional `INPUT_SYNCER_ADMIN_REQUIRE_MATCH_USER_DATA` matches the Unity multi-instance server behavior.
 
 ## Conventions
 

@@ -26,6 +26,15 @@ type AdminInstanceInfo = {
   uptimeSeconds: number;
   matchAccess: 'open' | 'password' | 'token';
   allowedMatchTokenCount: number;
+  serverUrl?: string;
+  clientConnection?: {
+    transport: string;
+    matchId: string;
+    host: string;
+    port: number;
+    socketIoUrl: string;
+    matchGatewayPath: string;
+  };
 };
 
 type AdminPoolStats = {

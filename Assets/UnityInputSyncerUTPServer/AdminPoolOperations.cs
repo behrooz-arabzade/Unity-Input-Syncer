@@ -16,6 +16,8 @@ namespace UnityInputSyncerUTPServer
             this.pool = pool;
         }
 
+        public bool RequireMatchUserDataOnCreate => pool.RequireMatchUserDataOnCreate;
+
         public Task<AdminInstanceInfo> CreateInstanceAsync(AdminCreateInstanceRequest request)
         {
             return UnityThreadDispatcher.RunOnMainThreadAsync(() =>
@@ -35,6 +37,7 @@ namespace UnityInputSyncerUTPServer
                     if (request.SendStepHistoryOnLateJoin.HasValue)
                         overrides.SendStepHistoryOnLateJoin = request.SendStepHistoryOnLateJoin.Value;
                     MatchAccessCreateValidation.MapToOptions(request, overrides);
+                    AdminMatchContextValidation.MapMatchContextToOptions(request, overrides);
                 }
 
                 var instance = pool.CreateInstance(overrides);
@@ -107,9 +110,10 @@ namespace UnityInputSyncerUTPServer
             });
         }
 
-        private static AdminInstanceInfo MapToInfo(ServerInstance instance)
+        private AdminInstanceInfo MapToInfo(ServerInstance instance)
         {
-            return new AdminInstanceInfo
+            var host = pool.PoolOptions.PublicHost?.Trim() ?? "";
+            var info = new AdminInstanceInfo
             {
                 Id = instance.Id,
                 Port = instance.Port,
@@ -125,6 +129,18 @@ namespace UnityInputSyncerUTPServer
                     instance.Server.GetOptions().MatchAccess),
                 AllowedMatchTokenCount = instance.Server.GetOptions().AllowedMatchTokens?.Count ?? 0,
             };
+
+            info.ClientConnection = new AdminClientConnectionInfo
+            {
+                Transport = "utp",
+                MatchId = instance.Id,
+                Host = host,
+                Port = instance.Port,
+                SocketIoUrl = null,
+                MatchGatewayPath = null,
+            };
+            info.ServerUrl = string.IsNullOrEmpty(host) ? null : $"{host}:{instance.Port}";
+            return info;
         }
     }
 }

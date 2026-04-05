@@ -150,6 +150,12 @@ namespace UnityInputSyncerClient
         /// <summary>Per-player session finish from server (<c>userId</c>, <c>data</c> payload).</summary>
         public Action<string, JToken> OnPlayerSessionFinish { get; set; }
 
+        /// <summary>Admin-defined match context (<c>matchId</c>, <c>matchData</c>, all <c>users</c>) from <c>on-match-context</c>.</summary>
+        public Action<InputSyncerMatchContext> OnMatchContext { get; set; }
+
+        /// <summary>Last received match context; set before <see cref="OnMatchContext"/> is invoked.</summary>
+        public InputSyncerMatchContext LastMatchContext { get; private set; }
+
         private bool OnMatchStartedInvoked = false;
         public Action OnMatchStarted { get; set; }
         public void HandleMatchStarted()
@@ -180,6 +186,28 @@ namespace UnityInputSyncerClient
             Driver.On(InputSyncerEvents.INPUT_SYNCER_START_EVENT, (response) =>
             {
                 HandleMatchStarted();
+            });
+
+            Driver.On(InputSyncerEvents.INPUT_SYNCER_MATCH_CONTEXT_EVENT, (response) =>
+            {
+                try
+                {
+                    var jo = Driver.GetData<JObject>(response);
+                    if (jo == null)
+                        return;
+                    var ctx = new InputSyncerMatchContext
+                    {
+                        MatchId = jo["matchId"]?.ToString(),
+                        MatchData = jo["matchData"],
+                        Users = jo["users"] as JObject ?? new JObject(),
+                    };
+                    LastMatchContext = ctx;
+                    OnMatchContext?.Invoke(ctx);
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogWarning($"OnMatchContext parse failed: {ex.Message}");
+                }
             });
 
             Driver.On(InputSyncerEvents.INPUT_SYNCER_FINISH_EVENT, (response) =>

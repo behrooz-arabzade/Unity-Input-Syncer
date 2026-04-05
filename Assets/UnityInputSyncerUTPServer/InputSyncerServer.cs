@@ -494,6 +494,8 @@ namespace UnityInputSyncerUTPServer
             player.UserId = userId;
             player.Joined = true;
 
+            SendMatchContextToPlayer(connectionId);
+
             OnPlayerJoined?.Invoke(player);
             Debug.Log($"[InputSyncerServer] Player joined: {player.UserId}");
 
@@ -504,6 +506,28 @@ namespace UnityInputSyncerUTPServer
                 StartMatch();
             else
                 UpdateAbandonDeadline();
+        }
+
+        private void SendMatchContextToPlayer(int connectionId)
+        {
+            var usersObj = new JObject();
+            if (Options.UserSimulationData != null)
+            {
+                foreach (var kv in Options.UserSimulationData)
+                    usersObj[kv.Key] = kv.Value != null ? kv.Value.DeepClone() : JValue.CreateNull();
+            }
+
+            var payload = new JObject
+            {
+                ["matchId"] = Options.MatchInstanceId ?? "",
+                ["matchData"] = Options.MatchData != null ? Options.MatchData.DeepClone() : JValue.CreateNull(),
+                ["users"] = usersObj,
+            };
+
+            Socket.SendJson(
+                connectionId,
+                InputSyncerEvents.INPUT_SYNCER_MATCH_CONTEXT_EVENT,
+                payload.ToString(Formatting.None));
         }
 
         private void SendAllStepsToPlayer(int connectionId)

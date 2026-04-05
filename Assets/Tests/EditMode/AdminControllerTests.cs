@@ -252,6 +252,40 @@ namespace Tests.EditMode
             Assert.AreEqual(2, mockPool.LastCreateRequest.AllowedMatchTokens.Count);
         }
 
+        [Test]
+        public async Task PostInstances_MatchDataAndUsers_PassedToPool()
+        {
+            var ctrl = CreateController();
+            var body = "{\"matchData\":{\"map\":\"m1\"},\"users\":{\"u1\":{\"hp\":10}}}";
+            var response = await ctrl.HandleRequestAsync("POST", "/api/instances", body);
+
+            Assert.AreEqual(201, response.StatusCode);
+            Assert.IsNotNull(mockPool.LastCreateRequest);
+            Assert.AreEqual("m1", mockPool.LastCreateRequest.MatchData["map"].ToString());
+            Assert.AreEqual(10, mockPool.LastCreateRequest.Users["u1"]["hp"].Value<int>());
+        }
+
+        [Test]
+        public async Task PostInstances_RequireMatchUserData_EmptyBody_Returns400()
+        {
+            mockPool.RequireMatchUserDataOnCreate = true;
+            var ctrl = CreateController();
+            var response = await ctrl.HandleRequestAsync("POST", "/api/instances", null);
+
+            Assert.AreEqual(400, response.StatusCode);
+        }
+
+        [Test]
+        public async Task PostInstances_RequireMatchUserData_WithMatchData_Returns201()
+        {
+            mockPool.RequireMatchUserDataOnCreate = true;
+            var ctrl = CreateController();
+            var body = "{\"matchData\":{\"x\":1}}";
+            var response = await ctrl.HandleRequestAsync("POST", "/api/instances", body);
+
+            Assert.AreEqual(201, response.StatusCode);
+        }
+
         // =========================================================
         // GET /api/instances
         // =========================================================

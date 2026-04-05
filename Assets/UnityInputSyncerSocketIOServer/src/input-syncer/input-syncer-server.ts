@@ -39,6 +39,8 @@ type ResolvedServerOptions = {
   matchPassword: string;
   allowedMatchTokens: Set<string>;
   rewardOutcomeDelivery: RewardOutcomeDeliveryMode;
+  matchData: unknown;
+  users: Record<string, unknown>;
   onRewardHookPerUser?: (payload: RewardPerUserHookPayload) => void;
   onRewardHookMatch?: (payload: RewardMatchHookPayload) => void;
 };
@@ -80,6 +82,13 @@ function resolveOptions(o?: InputSyncerServerOptions): ResolvedServerOptions {
     allowedMatchTokens,
     rewardOutcomeDelivery:
       o?.rewardOutcomeDelivery ?? RewardOutcomeDeliveryMode.ClientToAdmin,
+    matchData: o?.matchData ?? null,
+    users:
+      o?.users != null &&
+      typeof o.users === 'object' &&
+      !Array.isArray(o.users)
+        ? { ...(o.users as Record<string, unknown>) }
+        : {},
     onRewardHookPerUser: o?.onRewardHookPerUser,
     onRewardHookMatch: o?.onRewardHookMatch,
   };
@@ -217,6 +226,12 @@ export class InputSyncerServer {
       (data?.userId as string) || defaultAnonymousUserId(socketId);
     player.userId = userId;
     player.joined = true;
+
+    this.sendToSocket(socketId, InputSyncerEvents.INPUT_SYNCER_MATCH_CONTEXT_EVENT, {
+      matchId: this.options.matchInstanceId,
+      matchData: this.options.matchData ?? null,
+      users: this.options.users ?? {},
+    });
 
     this.onPlayerJoined(player);
 

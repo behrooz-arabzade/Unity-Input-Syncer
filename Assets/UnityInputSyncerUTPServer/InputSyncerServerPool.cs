@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Newtonsoft.Json.Linq;
 using UnityInputSyncerCore;
 using UnityInputSyncerCore.UTPSocket;
 
@@ -22,6 +23,10 @@ namespace UnityInputSyncerUTPServer
         private readonly List<string> pendingDestroys = new List<string>();
         private ushort nextSequentialPort;
         private bool disposed;
+
+        public InputSyncerServerPoolOptions PoolOptions => options;
+
+        public bool RequireMatchUserDataOnCreate => options.RequireMatchUserDataOnCreate;
 
         public InputSyncerServerPool(InputSyncerServerPoolOptions options = null, SocketServerFactory socketFactory = null)
         {
@@ -66,6 +71,10 @@ namespace UnityInputSyncerUTPServer
                 MatchAccess = o?.MatchAccess ?? d.MatchAccess,
                 MatchPassword = o != null ? o.MatchPassword : d.MatchPassword,
                 AllowedMatchTokens = MergeAllowedMatchTokens(o, d),
+                MatchData = o?.MatchData != null
+                    ? (JObject)o.MatchData.DeepClone()
+                    : (d.MatchData != null ? (JObject)d.MatchData.DeepClone() : null),
+                UserSimulationData = MergeUserSimulationDataField(o?.UserSimulationData, d.UserSimulationData),
             };
 
             ISocketServer socket = socketFactory?.Invoke(port);
@@ -279,6 +288,29 @@ namespace UnityInputSyncerUTPServer
                 return null;
             if (d.AllowedMatchTokens != null && d.AllowedMatchTokens.Count > 0)
                 return new HashSet<string>(d.AllowedMatchTokens, StringComparer.Ordinal);
+            return null;
+        }
+
+        private static Dictionary<string, JToken> MergeUserSimulationDataField(
+            Dictionary<string, JToken> o,
+            Dictionary<string, JToken> d)
+        {
+            if (o != null)
+            {
+                var m = new Dictionary<string, JToken>(StringComparer.Ordinal);
+                foreach (var kv in o)
+                    m[kv.Key] = kv.Value?.DeepClone();
+                return m.Count > 0 ? m : null;
+            }
+
+            if (d != null && d.Count > 0)
+            {
+                var m = new Dictionary<string, JToken>(StringComparer.Ordinal);
+                foreach (var kv in d)
+                    m[kv.Key] = kv.Value?.DeepClone();
+                return m;
+            }
+
             return null;
         }
     }

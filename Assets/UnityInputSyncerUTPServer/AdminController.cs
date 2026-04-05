@@ -97,17 +97,22 @@ namespace UnityInputSyncerUTPServer
                 }
             }
 
+            var errors = new List<string>();
             if (request != null)
             {
-                var errors = new List<string>();
                 if (request.MaxPlayers.HasValue && request.MaxPlayers.Value < 1)
                     errors.Add("maxPlayers must be >= 1");
                 if (request.StepIntervalSeconds.HasValue && request.StepIntervalSeconds.Value <= 0)
                     errors.Add("stepIntervalSeconds must be > 0");
                 MatchAccessCreateValidation.Validate(request, errors);
-                if (errors.Count > 0)
-                    return new AdminResponse(400, Serialize(new { error = "Invalid parameters", details = errors }));
             }
+
+            AdminMatchContextValidation.Validate(
+                request,
+                errors,
+                pool.RequireMatchUserDataOnCreate);
+            if (errors.Count > 0)
+                return new AdminResponse(400, Serialize(new { error = "Invalid parameters", details = errors }));
 
             try
             {

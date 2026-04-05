@@ -2,8 +2,21 @@ using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 
+using Newtonsoft.Json.Linq;
+
 namespace UnityInputSyncerUTPServer
 {
+    public class AdminClientConnectionInfo
+    {
+        public string Transport;
+        public string MatchId;
+        public string Host;
+        public int Port;
+        /// <summary>Base URL for Socket.IO Unity client (scheme + host + port, no path).</summary>
+        public string SocketIoUrl;
+        public string MatchGatewayPath;
+    }
+
     public class AdminInstanceInfo
     {
         public string Id;
@@ -18,6 +31,9 @@ namespace UnityInputSyncerUTPServer
         public double UptimeSeconds;
         public string MatchAccess;
         public int AllowedMatchTokenCount;
+        /// <summary>Convenience string for clients (UTP: <c>host:port</c> when pool public host is configured).</summary>
+        public string ServerUrl;
+        public AdminClientConnectionInfo ClientConnection;
     }
 
     public class AdminCreateInstanceRequest
@@ -30,6 +46,8 @@ namespace UnityInputSyncerUTPServer
         public string MatchAccess;
         public string MatchPassword;
         public List<string> AllowedMatchTokens;
+        public JObject MatchData;
+        public JObject Users;
     }
 
     public class AdminResourceUsage
@@ -65,6 +83,8 @@ namespace UnityInputSyncerUTPServer
 
     public interface IAdminPoolOperations
     {
+        bool RequireMatchUserDataOnCreate { get; }
+
         Task<AdminInstanceInfo> CreateInstanceAsync(AdminCreateInstanceRequest request);
         Task<bool> DestroyInstanceAsync(string id);
         Task<AdminInstanceInfo> GetInstanceAsync(string id);

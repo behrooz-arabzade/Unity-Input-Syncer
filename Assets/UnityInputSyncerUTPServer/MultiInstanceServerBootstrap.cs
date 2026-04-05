@@ -13,6 +13,10 @@ namespace UnityInputSyncerUTPServer
         [Header("Admin Configuration")]
         [SerializeField] private ushort adminPort = 8080;
         [SerializeField] private string authToken = "";
+        [Tooltip("Public hostname or IP (no scheme) included in admin API ServerUrl / ClientConnection for clients.")]
+        [SerializeField] private string publicHost = "";
+        [Tooltip("When true, POST /api/instances must include non-empty matchData and/or users.")]
+        [SerializeField] private bool requireMatchUserDataOnCreate = false;
 
         [Header("Default Server Options")]
         [SerializeField] private int maxPlayers = 2;
@@ -80,6 +84,8 @@ namespace UnityInputSyncerUTPServer
                 AutoRecycleOnFinish = autoRecycleOnFinish,
                 IdleTimeoutSeconds = idleTimeoutSeconds,
                 MaxInstanceLifetimeSeconds = maxInstanceLifetimeSeconds,
+                PublicHost = publicHost,
+                RequireMatchUserDataOnCreate = requireMatchUserDataOnCreate,
                 DefaultServerOptions = new InputSyncerServerOptions
                 {
                     MaxPlayers = maxPlayers,
@@ -132,6 +138,12 @@ namespace UnityInputSyncerUTPServer
 
             if (DedicatedServerBootstrap.TryGetEnvString("INPUT_SYNCER_ADMIN_AUTH_TOKEN", out var envAuthToken))
                 authToken = envAuthToken;
+
+            if (DedicatedServerBootstrap.TryGetEnvString("INPUT_SYNCER_PUBLIC_HOST", out var envPublicHost))
+                publicHost = envPublicHost;
+
+            if (DedicatedServerBootstrap.TryGetEnvBool("INPUT_SYNCER_ADMIN_REQUIRE_MATCH_USER_DATA", out var envReqMu))
+                requireMatchUserDataOnCreate = envReqMu;
 
             if (DedicatedServerBootstrap.TryGetEnvInt("INPUT_SYNCER_MAX_PLAYERS", out var envMaxPlayers))
                 maxPlayers = envMaxPlayers;

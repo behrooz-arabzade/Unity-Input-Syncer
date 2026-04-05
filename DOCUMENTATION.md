@@ -521,27 +521,67 @@ All endpoints require `Authorization: Bearer <token>` if `INPUT_SYNCER_ADMIN_AUT
 
 **Create instance (with optional overrides):**
 
+Optional JSON fields:
+
+- `matchData` — opaque object stored on the instance and sent to every client in `on-match-context` after they join.
+- `users` — object map `userId →` opaque per-player simulation payload (equipment, stats, etc.); same event delivers the full map to all clients.
+- Match access fields: `matchAccess`, `matchPassword`, `allowedMatchTokens` (see server docs).
+
+Size limits (UTP admin and Socket.IO admin): `matchData` ≤ 65536 UTF-8 bytes; each `users` entry ≤ 16384 bytes; at most 64 user entries.
+
+If `INPUT_SYNCER_ADMIN_REQUIRE_MATCH_USER_DATA` is `true` / `1`, the body must include non-empty `matchData` and/or non-empty `users`.
+
 ```bash
 curl -X POST http://localhost:8080/api/instances \
   -H "Authorization: Bearer your-token" \
   -H "Content-Type: application/json" \
-  -d '{"maxPlayers": 4, "stepIntervalSeconds": 0.05}'
+  -d '{"maxPlayers": 4, "stepIntervalSeconds": 0.05, "matchData": {"map": "arena"}, "users": {"p1": {"hp": 100}}}'
 ```
 
-Response:
+Response (UTP multi-instance; fields vary slightly for Socket.IO):
 
 ```json
 {
   "id": "abc-123",
   "port": 7778,
   "state": "Idle",
-  "createdAt": "2026-01-01T00:00:00Z"
+  "createdAt": "2026-01-01T00:00:00Z",
+  "serverUrl": "game.example.com:7778",
+  "clientConnection": {
+    "transport": "utp",
+    "matchId": "abc-123",
+    "host": "game.example.com",
+    "port": 7778,
+    "socketIoUrl": null,
+    "matchGatewayPath": null
+  }
 }
 ```
 
+- `serverUrl` and `clientConnection` are populated when a **public host** is configured (`INPUT_SYNCER_PUBLIC_HOST` on the Unity multi-instance server). Otherwise they may be omitted (`serverUrl`) or have an empty `host`.
+- **Socket.IO** pool: set `INPUT_SYNCER_PUBLIC_CLIENT_SOCKET_IO_URL` (e.g. `https://game.example.com`) so `serverUrl` and `clientConnection.socketIoUrl` point at the public entry; `clientConnection.matchGatewayPath` is `/match-gateway`. All instances share the same listener port; `matchId` in `clientConnection` is the instance id clients pass as the `matchId` query parameter.
+
 **Instance lifecycle states:** `Idle` → `WaitingForPlayers` → `InMatch` → `Finished`
 
-Clients connect to the instance using the returned port number.
+Clients connect using `clientConnection` / `serverUrl` as appropriate (UTP: host + port; Socket.IO: base URL + gateway path + `matchId` query).
+
+### Match context on the client (`on-match-context`)
+
+After a successful join, the server emits **`on-match-context`** with JSON:
+
+`{ "matchId", "matchData", "users" }` — the same admin snapshot for every player.
+
+```csharp
+client.OnMatchContext = ctx =>
+{
+    string id = ctx.MatchId;
+    JToken match = ctx.MatchData;
+    JObject allUsers = ctx.Users; // per userId, game-defined payloads
+};
+// Or read client.LastMatchContext after the event fired.
+```
+
+This is not fired in **mock** mode.
 
 ### Use Mock Mode for Offline Testing
 

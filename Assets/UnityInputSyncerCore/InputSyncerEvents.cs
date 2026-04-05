@@ -7,6 +7,8 @@ namespace UnityInputSyncerCore
         public const string INPUT_SYNCER_FINISH_EVENT = "on-finish";
         public const string INPUT_SYNCER_USER_FINISH_EVENT = "on-user-finish";
         public const string INPUT_SYNCER_START_EVENT = "on-start";
+        /// <summary>Server sends admin-defined <c>matchData</c> and per-user simulation payloads after join (or equivalent).</summary>
+        public const string INPUT_SYNCER_MATCH_CONTEXT_EVENT = "on-match-context";
         public const string INPUT_SYNCER_CONTENT_ERROR = "content-error";
         public const string MATCH_USER_REQUEST_ALL_STEPS_EVENT = "request-all-steps";
         public const string MATCH_USER_JOIN_EVENT = "join";

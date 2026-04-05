@@ -6,6 +6,7 @@ import {
   HttpCode,
   HttpException,
   HttpStatus,
+  Inject,
   Param,
   Post,
   UseGuards,
@@ -14,7 +15,11 @@ import * as os from 'os';
 import { InputSyncerPoolService } from './pool.service';
 import { BearerAuthGuard } from './admin.guard';
 import { ServerInstance } from './server-instance';
-import { InputSyncerServerOptions } from './interfaces';
+import {
+  INPUT_SYNCER_OPTIONS,
+  InputSyncerModuleOptions,
+  InputSyncerServerOptions,
+} from './interfaces';
 import {
   AdminCreateInstanceRequest,
   AdminInstanceInfo,
@@ -22,6 +27,7 @@ import {
   ServerInstanceState,
 } from './types';
 import { validateAdminMatchAccess } from './match-access';
+import { validateAdminMatchContext } from './match-context-admin';
 
 /** Only pass fields present on the body so `{}` does not wipe module defaults. */
 function overridesFromCreateBody(
@@ -42,13 +48,26 @@ function overridesFromCreateBody(
   if (body.matchPassword !== undefined) o.matchPassword = body.matchPassword;
   if (body.allowedMatchTokens !== undefined)
     o.allowedMatchTokens = body.allowedMatchTokens;
+  if (body.matchData !== undefined) o.matchData = body.matchData;
+  if (body.users !== undefined) {
+    o.users =
+      body.users != null &&
+      typeof body.users === 'object' &&
+      !Array.isArray(body.users)
+        ? { ...(body.users as Record<string, unknown>) }
+        : {};
+  }
   return Object.keys(o).length > 0 ? o : undefined;
 }
 
 @Controller('api')
 @UseGuards(BearerAuthGuard)
 export class AdminController {
-  constructor(private readonly pool: InputSyncerPoolService) {}
+  constructor(
+    private readonly pool: InputSyncerPoolService,
+    @Inject(INPUT_SYNCER_OPTIONS)
+    private readonly moduleOptions: InputSyncerModuleOptions,
+  ) {}
 
   @Post('instances')
   @HttpCode(HttpStatus.CREATED)
@@ -65,6 +84,9 @@ export class AdminController {
       errors.push('stepIntervalSeconds must be > 0');
 
     errors.push(...validateAdminMatchAccess(body));
+    errors.push(
+      ...validateAdminMatchContext(body, this.pool.requireMatchUserDataOnCreate),
+    );
 
     if (errors.length > 0) {
       throw new HttpException(
@@ -76,7 +98,7 @@ export class AdminController {
     try {
       const instance = this.pool.createInstance(overridesFromCreateBody(body));
 
-      return mapToInfo(instance);
+      return mapToInfo(instance, this.moduleOptions);
     } catch (err) {
       throw new HttpException(
         { error: (err as Error).message },
@@ -87,7 +109,9 @@ export class AdminController {
 
   @Get('instances')
   listInstances(): AdminInstanceInfo[] {
-    return this.pool.getAllInstances().map(mapToInfo);
+    return this.pool
+      .getAllInstances()
+      .map((i) => mapToInfo(i, this.moduleOptions));
   }
 
   @Get('instances/:id')
@@ -99,7 +123,7 @@ export class AdminController {
         HttpStatus.NOT_FOUND,
       );
     }
-    return mapToInfo(instance);
+    return mapToInfo(instance, this.moduleOptions);
   }
 
   @Delete('instances/:id')
@@ -133,7 +157,7 @@ export class AdminController {
       finishedCount: all.filter(
         (i) => i.state === ServerInstanceState.Finished,
       ).length,
-      instances: all.map(mapToInfo),
+      instances: all.map((i) => mapToInfo(i, this.moduleOptions)),
       resourceUsage: {
         heapUsedBytes: mem.heapUsed,
         rssBytes: mem.rss,
@@ -143,8 +167,21 @@ export class AdminController {
   }
 }
 
-function mapToInfo(instance: ServerInstance): AdminInstanceInfo {
+function mapToInfo(
+  instance: ServerInstance,
+  moduleOptions: InputSyncerModuleOptions,
+): AdminInstanceInfo {
   const opts = instance.server.options;
+  const port = parseInt(process.env.INPUT_SYNCER_PORT ?? '3000', 10);
+  const base =
+    moduleOptions.pool?.publicClientSocketIoUrl?.trim() ||
+    `http://localhost:${port}`;
+  let host = '';
+  try {
+    host = new URL(base).hostname;
+  } catch {
+    /* ignore */
+  }
   return {
     id: instance.id,
     state: instance.state,
@@ -157,5 +194,14 @@ function mapToInfo(instance: ServerInstance): AdminInstanceInfo {
     uptimeSeconds: (Date.now() - instance.createdAt.getTime()) / 1000,
     matchAccess: opts.matchAccess,
     allowedMatchTokenCount: opts.allowedMatchTokens.size,
+    serverUrl: base,
+    clientConnection: {
+      transport: 'socket.io',
+      matchId: instance.id,
+      host,
+      port,
+      socketIoUrl: base,
+      matchGatewayPath: '/match-gateway',
+    },
   };
 }

@@ -16,6 +16,15 @@ export enum ServerInstanceState {
   Finished = 'Finished',
 }
 
+export interface AdminClientConnectionInfo {
+  transport: string;
+  matchId: string;
+  host: string;
+  port: number;
+  socketIoUrl: string;
+  matchGatewayPath: string;
+}
+
 export interface AdminInstanceInfo {
   id: string;
   state: string;
@@ -28,6 +37,9 @@ export interface AdminInstanceInfo {
   uptimeSeconds: number;
   matchAccess: 'open' | 'password' | 'token';
   allowedMatchTokenCount: number;
+  /** Base URL for Socket.IO client when configured (or localhost fallback). */
+  serverUrl?: string;
+  clientConnection?: AdminClientConnectionInfo;
 }
 
 export interface AdminCreateInstanceRequest {
@@ -39,6 +51,8 @@ export interface AdminCreateInstanceRequest {
   matchAccess?: string;
   matchPassword?: string;
   allowedMatchTokens?: string[];
+  matchData?: unknown;
+  users?: Record<string, unknown>;
 }
 
 export interface AdminResourceUsage {

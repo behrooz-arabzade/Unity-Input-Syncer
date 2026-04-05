@@ -31,6 +31,8 @@ function mergeServerOptions(
     'matchAccess',
     'matchPassword',
     'allowedMatchTokens',
+    'matchData',
+    'users',
     'rewardOutcomeDelivery',
     'onRewardHookPerUser',
     'onRewardHookMatch',
@@ -78,6 +80,10 @@ export class InputSyncerPoolService implements OnModuleDestroy {
     this.defaultServerOptions = moduleOptions.defaults ?? {};
 
     this.tickInterval = setInterval(() => this.tick(), 1000);
+  }
+
+  get requireMatchUserDataOnCreate(): boolean {
+    return !!this.moduleOptions.pool?.requireMatchUserDataOnCreate;
   }
 
   onModuleDestroy(): void {

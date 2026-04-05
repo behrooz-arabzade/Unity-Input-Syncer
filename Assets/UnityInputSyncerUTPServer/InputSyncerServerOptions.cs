@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Newtonsoft.Json.Linq;
 using UnityInputSyncerCore;
 
 namespace UnityInputSyncerUTPServer
@@ -42,6 +43,12 @@ namespace UnityInputSyncerUTPServer
 
         /// <summary>Allowed join tokens when <see cref="MatchAccess"/> is Token.</summary>
         public HashSet<string> AllowedMatchTokens;
+
+        /// <summary>Opaque JSON from admin create; sent to clients as <c>on-match-context</c>.</summary>
+        public JObject MatchData;
+
+        /// <summary>Per-userId simulation payloads from admin create.</summary>
+        public Dictionary<string, JToken> UserSimulationData;
 
         public RewardOutcomeDeliveryMode RewardOutcomeDelivery = RewardOutcomeDeliveryMode.ClientToAdmin;
 

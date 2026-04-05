@@ -5,6 +5,7 @@ export const InputSyncerEvents = {
   INPUT_SYNCER_FINISH_EVENT: 'on-finish',
   INPUT_SYNCER_USER_FINISH_EVENT: 'on-user-finish',
   INPUT_SYNCER_START_EVENT: 'on-start',
+  INPUT_SYNCER_MATCH_CONTEXT_EVENT: 'on-match-context',
   INPUT_SYNCER_CONTENT_ERROR: 'content-error',
 
   // Client -> Server

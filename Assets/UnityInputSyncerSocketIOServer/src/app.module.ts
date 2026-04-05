@@ -40,6 +40,12 @@ function envRewardMode(): RewardOutcomeDeliveryMode {
           'INPUT_SYNCER_MAX_INSTANCE_LIFETIME',
           0,
         ),
+        publicClientSocketIoUrl:
+          process.env.INPUT_SYNCER_PUBLIC_CLIENT_SOCKET_IO_URL,
+        requireMatchUserDataOnCreate: envBool(
+          'INPUT_SYNCER_ADMIN_REQUIRE_MATCH_USER_DATA',
+          false,
+        ),
       },
       defaults: {
         maxPlayers: envInt('INPUT_SYNCER_MAX_PLAYERS', 2),

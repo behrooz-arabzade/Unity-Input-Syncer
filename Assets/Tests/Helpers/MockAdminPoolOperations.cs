@@ -20,6 +20,8 @@ namespace Tests.Helpers
 
         public AdminCreateInstanceRequest LastCreateRequest;
 
+        public bool RequireMatchUserDataOnCreate { get; set; }
+
         public Task<AdminInstanceInfo> CreateInstanceAsync(AdminCreateInstanceRequest request)
         {
             CreateCallCount++;

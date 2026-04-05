@@ -21,6 +21,10 @@ export interface InputSyncerServerOptions {
   matchAccess?: 'open' | 'password' | 'token';
   matchPassword?: string;
   allowedMatchTokens?: string[];
+  /** Opaque JSON from admin create; sent to clients as on-match-context. */
+  matchData?: unknown;
+  /** Per-userId simulation payloads from admin create. */
+  users?: Record<string, unknown>;
   rewardOutcomeDelivery?: RewardOutcomeDeliveryMode;
   onRewardHookPerUser?: (payload: RewardPerUserHookPayload) => void;
   onRewardHookMatch?: (payload: RewardMatchHookPayload) => void;
@@ -31,6 +35,10 @@ export interface InputSyncerPoolOptions {
   autoRecycleOnFinish?: boolean;
   idleTimeoutSeconds?: number;
   maxInstanceLifetimeSeconds?: number;
+  /** Base URL for Socket.IO clients (scheme + host + port, no path), e.g. https://game.example.com */
+  publicClientSocketIoUrl?: string;
+  /** When true, POST /api/instances must include non-empty matchData and/or users. */
+  requireMatchUserDataOnCreate?: boolean;
 }
 
 export interface InputSyncerAdminOptions {
