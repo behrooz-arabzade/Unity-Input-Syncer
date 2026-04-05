@@ -1,3 +1,4 @@
+import { createHash } from 'crypto';
 import { InputSyncerEvents } from './input-syncer-events';
 import { InputSyncerFinishReasons } from './finish-reasons';
 import { InputSyncerPlayer } from './input-syncer-player';
@@ -16,6 +17,11 @@ export type SendToSocketFn = (
   event: string,
   data: unknown,
 ) => void;
+
+function defaultAnonymousUserId(socketId: string): string {
+  const h = createHash('sha256').update(socketId, 'utf8').digest('hex');
+  return `player-${h.slice(0, 8)}`;
+}
 
 type ResolvedServerOptions = {
   maxPlayers: number;
@@ -208,7 +214,7 @@ export class InputSyncerServer {
     }
 
     const userId =
-      (data?.userId as string) || `player-${socketId.substring(0, 8)}`;
+      (data?.userId as string) || defaultAnonymousUserId(socketId);
     player.userId = userId;
     player.joined = true;
 

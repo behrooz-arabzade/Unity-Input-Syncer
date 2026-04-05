@@ -122,5 +122,34 @@ namespace Tests.EditMode
                 data.Dispose();
             }
         }
+
+        [Test]
+        public void TryGetOptionalUserId_ReturnsTrimmedValue()
+        {
+            var data = Utf8Bytes("{\"userId\":\"  u1  \"}");
+            try
+            {
+                Assert.IsTrue(MatchAccessHandshake.TryGetOptionalUserId(data, out var uid));
+                Assert.AreEqual("u1", uid);
+            }
+            finally
+            {
+                data.Dispose();
+            }
+        }
+
+        [Test]
+        public void TryGetOptionalUserId_FalseWhenMissing()
+        {
+            var data = Utf8Bytes("{}");
+            try
+            {
+                Assert.IsFalse(MatchAccessHandshake.TryGetOptionalUserId(data, out _));
+            }
+            finally
+            {
+                data.Dispose();
+            }
+        }
     }
 }

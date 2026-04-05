@@ -50,6 +50,7 @@ namespace UnityInputSyncerUTPServer
                 HeartbeatTimeout = o?.HeartbeatTimeout ?? d.HeartbeatTimeout,
                 MaxPlayers = o?.MaxPlayers ?? d.MaxPlayers,
                 AutoStartWhenFull = o?.AutoStartWhenFull ?? d.AutoStartWhenFull,
+                AutoJoinOnConnect = o?.AutoJoinOnConnect ?? d.AutoJoinOnConnect,
                 StepIntervalSeconds = o?.StepIntervalSeconds ?? d.StepIntervalSeconds,
                 AllowLateJoin = o?.AllowLateJoin ?? d.AllowLateJoin,
                 SendStepHistoryOnLateJoin = o?.SendStepHistoryOnLateJoin ?? d.SendStepHistoryOnLateJoin,
@@ -257,6 +258,7 @@ namespace UnityInputSyncerUTPServer
             instance.OnStateChanged -= HandleInstanceStateChanged;
             instances.Remove(instance.Id);
             ReleasePort(instance.Port);
+            instance.Server.NotifyInstanceDestroyedBeforeShutdown();
             instance.Server.Dispose();
             OnInstanceDestroyed?.Invoke(instance);
         }

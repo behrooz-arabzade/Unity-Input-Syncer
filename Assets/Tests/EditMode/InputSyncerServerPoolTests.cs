@@ -280,6 +280,23 @@ namespace Tests.EditMode
         }
 
         [Test]
+        public void DestroyInstance_SendsInstanceDestroyedContentError_ToClients()
+        {
+            CreatePool();
+            var instance = pool.CreateInstance();
+            var socket = GetSocket(0);
+            ConnectAndJoin(socket, "alice");
+            socket.ClearSentMessages();
+
+            pool.DestroyInstance(instance.Id);
+
+            var msgs = socket.GetMessagesByEvent(InputSyncerEvents.INPUT_SYNCER_CONTENT_ERROR);
+            Assert.AreEqual(1, msgs.Count);
+            var jo = JObject.Parse(msgs[0].Json);
+            Assert.AreEqual("instance-destroyed", jo["reason"]?.ToString());
+        }
+
+        [Test]
         public void DestroyInstance_RemovesFromPool()
         {
             CreatePool();

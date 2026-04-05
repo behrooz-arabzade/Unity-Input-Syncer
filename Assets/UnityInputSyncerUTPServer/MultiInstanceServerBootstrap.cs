@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityInputSyncerCore;
 
 namespace UnityInputSyncerUTPServer
 {
@@ -16,6 +17,7 @@ namespace UnityInputSyncerUTPServer
         [Header("Default Server Options")]
         [SerializeField] private int maxPlayers = 2;
         [SerializeField] private bool autoStartWhenFull = true;
+        [SerializeField] private bool autoJoinOnConnect = true;
         [SerializeField] private float stepIntervalSeconds = 0.1f;
         [SerializeField] private bool allowLateJoin = false;
         [SerializeField] private bool sendStepHistoryOnLateJoin = true;
@@ -24,6 +26,10 @@ namespace UnityInputSyncerUTPServer
         [SerializeField] private float maxInstanceLifetimeSeconds;
         [SerializeField] private float abandonMatchTimeoutSeconds;
         [SerializeField] private bool quorumUserFinishEndsMatch = true;
+        [SerializeField] private int sessionFinishMaxPayloadBytes = 4096;
+        [SerializeField] private bool sessionFinishBroadcast = true;
+        [SerializeField] private bool rejectInputAfterSessionFinish;
+        [SerializeField] private RewardOutcomeDeliveryMode rewardOutcomeDelivery = RewardOutcomeDeliveryMode.ClientToAdmin;
 
         private InputSyncerServerPool pool;
         private AdminHttpServer httpServer;
@@ -47,6 +53,11 @@ namespace UnityInputSyncerUTPServer
         internal float ConfigMaxInstanceLifetimeSeconds => maxInstanceLifetimeSeconds;
         internal float ConfigAbandonMatchTimeoutSeconds => abandonMatchTimeoutSeconds;
         internal bool ConfigQuorumUserFinishEndsMatch => quorumUserFinishEndsMatch;
+        internal bool ConfigAutoJoinOnConnect => autoJoinOnConnect;
+        internal int ConfigSessionFinishMaxPayloadBytes => sessionFinishMaxPayloadBytes;
+        internal bool ConfigSessionFinishBroadcast => sessionFinishBroadcast;
+        internal bool ConfigRejectInputAfterSessionFinish => rejectInputAfterSessionFinish;
+        internal RewardOutcomeDeliveryMode ConfigRewardOutcomeDelivery => rewardOutcomeDelivery;
 
         void Awake()
         {
@@ -73,12 +84,17 @@ namespace UnityInputSyncerUTPServer
                 {
                     MaxPlayers = maxPlayers,
                     AutoStartWhenFull = autoStartWhenFull,
+                    AutoJoinOnConnect = autoJoinOnConnect,
                     StepIntervalSeconds = stepIntervalSeconds,
                     AllowLateJoin = allowLateJoin,
                     SendStepHistoryOnLateJoin = sendStepHistoryOnLateJoin,
                     HeartbeatTimeout = heartbeatTimeout,
                     AbandonMatchTimeoutSeconds = abandonMatchTimeoutSeconds,
                     QuorumUserFinishEndsMatch = quorumUserFinishEndsMatch,
+                    SessionFinishMaxPayloadBytes = sessionFinishMaxPayloadBytes,
+                    SessionFinishBroadcast = sessionFinishBroadcast,
+                    RejectInputAfterSessionFinish = rejectInputAfterSessionFinish,
+                    RewardOutcomeDelivery = rewardOutcomeDelivery,
                 },
             };
 
@@ -146,6 +162,28 @@ namespace UnityInputSyncerUTPServer
 
             if (DedicatedServerBootstrap.TryGetEnvBool("INPUT_SYNCER_QUORUM_USER_FINISH_ENDS_MATCH", out var envQuorum))
                 quorumUserFinishEndsMatch = envQuorum;
+
+            if (DedicatedServerBootstrap.TryGetEnvBool("INPUT_SYNCER_AUTO_JOIN_ON_CONNECT", out var envAutoJoin))
+                autoJoinOnConnect = envAutoJoin;
+
+            if (DedicatedServerBootstrap.TryGetEnvInt("INPUT_SYNCER_SESSION_FINISH_MAX_PAYLOAD_BYTES", out var envSessMax))
+                sessionFinishMaxPayloadBytes = envSessMax;
+
+            if (DedicatedServerBootstrap.TryGetEnvBool("INPUT_SYNCER_SESSION_FINISH_BROADCAST", out var envSessBc))
+                sessionFinishBroadcast = envSessBc;
+
+            if (DedicatedServerBootstrap.TryGetEnvBool("INPUT_SYNCER_REJECT_INPUT_AFTER_SESSION_FINISH", out var envReject))
+                rejectInputAfterSessionFinish = envReject;
+
+            if (DedicatedServerBootstrap.TryGetEnvInt("INPUT_SYNCER_REWARD_OUTCOME_DELIVERY", out var envReward))
+            {
+                if (envReward == 1)
+                    rewardOutcomeDelivery = RewardOutcomeDeliveryMode.ServerHookPerUser;
+                else if (envReward == 2)
+                    rewardOutcomeDelivery = RewardOutcomeDeliveryMode.ServerHookMatchOrReferee;
+                else
+                    rewardOutcomeDelivery = RewardOutcomeDeliveryMode.ClientToAdmin;
+            }
         }
     }
 }

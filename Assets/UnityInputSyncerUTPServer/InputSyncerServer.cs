@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
+using System.Security.Cryptography;
 using System.Text;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
@@ -31,6 +33,9 @@ namespace UnityInputSyncerUTPServer
 
         private DateTime? AbandonDeadlineUtc;
 
+        /// <summary>Optional <c>userId</c> from UTP handshake JSON, consumed on <see cref="OnClientConnected"/>.</summary>
+        private readonly Dictionary<int, string> pendingHandshakeUserIds = new Dictionary<int, string>();
+
         private Dictionary<string, List<Action<int, JToken>>> customJsonCallbacks =
             new Dictionary<string, List<Action<int, JToken>>>();
 
@@ -55,7 +60,15 @@ namespace UnityInputSyncerUTPServer
                     Port = Options.Port,
                     HeartbeatTimeout = Options.HeartbeatTimeout,
                     OnHandshakeValidation = (connectionId, data) =>
-                        MatchAccessHandshake.Validate(Options, data),
+                    {
+                        if (!MatchAccessHandshake.Validate(Options, data))
+                            return false;
+                        if (MatchAccessHandshake.TryGetOptionalUserId(data, out var uid))
+                            pendingHandshakeUserIds[connectionId] = uid;
+                        else
+                            pendingHandshakeUserIds.Remove(connectionId);
+                        return true;
+                    },
                 };
                 Socket = new UTPSocketServer(utpOptions);
             }
@@ -161,6 +174,28 @@ namespace UnityInputSyncerUTPServer
             Socket.Dispose();
         }
 
+        /// <summary>Emit Socket.IO–compatible <c>content-error</c> before tearing down a pooled instance.</summary>
+        public void NotifyInstanceDestroyedBeforeShutdown()
+        {
+            const string payload =
+                "{\"reason\":\"instance-destroyed\",\"message\":\"This match instance was closed by the server\"}";
+            foreach (var connectionId in State.Players.Keys.ToList())
+                Socket.SendJson(connectionId, InputSyncerEvents.INPUT_SYNCER_CONTENT_ERROR, payload);
+        }
+
+        internal static string DefaultAnonymousUserId(int connectionId)
+        {
+            using (var sha = SHA256.Create())
+            {
+                byte[] hash = sha.ComputeHash(
+                    Encoding.UTF8.GetBytes(connectionId.ToString(CultureInfo.InvariantCulture)));
+                var sb = new StringBuilder("player-");
+                for (int i = 0; i < 4; i++)
+                    sb.AppendFormat(CultureInfo.InvariantCulture, "{0:x2}", hash[i]);
+                return sb.ToString();
+            }
+        }
+
         private void TickStep()
         {
             CheckAbandonDeadlineExpired();
@@ -170,7 +205,8 @@ namespace UnityInputSyncerUTPServer
 
             State.StepAccumulator += Time.deltaTime;
 
-            while (State.StepAccumulator >= Options.StepIntervalSeconds)
+            // One step per tick max — matches Socket.IO setInterval semantics (no burst catch-up).
+            if (State.StepAccumulator >= Options.StepIntervalSeconds)
             {
                 State.StepAccumulator -= Options.StepIntervalSeconds;
                 ProcessStep();
@@ -268,48 +304,7 @@ namespace UnityInputSyncerUTPServer
         {
             Socket.On(InputSyncerEvents.MATCH_USER_JOIN_EVENT, (connectionId, data) =>
             {
-                if (!State.Players.ContainsKey(connectionId))
-                    return;
-
-                var player = State.Players[connectionId];
-
-                if (player.Joined)
-                    return;
-
-                if (State.MatchStarted && !Options.AllowLateJoin)
-                {
-                    Debug.LogWarning($"[InputSyncerServer] Player tried to join after match started (AllowLateJoin=false)");
-                    return;
-                }
-
-                if (GetJoinedPlayerCount() >= Options.MaxPlayers)
-                {
-                    Debug.LogWarning($"[InputSyncerServer] Player tried to join but match is full ({GetJoinedPlayerCount()}/{Options.MaxPlayers})");
-                    string errorJson = JsonConvert.SerializeObject(new { reason = "match-full", message = $"Match is full ({Options.MaxPlayers} players max)" });
-                    Socket.SendJson(connectionId, InputSyncerEvents.INPUT_SYNCER_CONTENT_ERROR, errorJson);
-                    return;
-                }
-
-                string userId = data is JObject obj ? obj.Value<string>("userId") : null;
-                player.UserId = userId ?? $"player-{connectionId}";
-                player.Joined = true;
-
-                OnPlayerJoined?.Invoke(player);
-                Debug.Log($"[InputSyncerServer] Player joined: {player.UserId}");
-
-                if (State.MatchStarted && Options.AllowLateJoin && Options.SendStepHistoryOnLateJoin)
-                {
-                    SendAllStepsToPlayer(connectionId);
-                }
-
-                if (Options.AutoStartWhenFull && !State.MatchStarted && GetJoinedPlayerCount() >= Options.MaxPlayers)
-                {
-                    StartMatch();
-                }
-                else
-                {
-                    UpdateAbandonDeadline();
-                }
+                HandleJoinPayload(connectionId, data as JObject);
             });
 
             Socket.On(InputSyncerEvents.MATCH_USER_INPUT_EVENT, (connectionId, data) =>
@@ -450,13 +445,65 @@ namespace UnityInputSyncerUTPServer
             if (data == null || data.Type == JTokenType.Null)
                 return new JObject();
 
-            if (data is JObject obj && obj["data"] != null)
-                return obj["data"];
+            if (data is not JObject obj)
+                return new JObject();
 
-            if (data is JObject)
-                return data;
+            var inner = obj["data"];
+            if (inner != null && inner.Type == JTokenType.Object)
+                return inner;
 
-            return new JObject();
+            return obj;
+        }
+
+        void HandleJoinPayload(int connectionId, JObject body)
+        {
+            if (!State.Players.TryGetValue(connectionId, out var player))
+                return;
+
+            string requestedUserId = body?.Value<string>("userId");
+
+            if (player.Joined)
+            {
+                if (!State.MatchStarted && !string.IsNullOrEmpty(requestedUserId))
+                    player.UserId = requestedUserId.Trim();
+                return;
+            }
+
+            TryCompleteJoin(connectionId, player, requestedUserId);
+        }
+
+        void TryCompleteJoin(int connectionId, InputSyncerServerPlayer player, string requestedUserId)
+        {
+            if (State.MatchStarted && !Options.AllowLateJoin)
+            {
+                Debug.LogWarning($"[InputSyncerServer] Player tried to join after match started (AllowLateJoin=false)");
+                return;
+            }
+
+            if (GetJoinedPlayerCount() >= Options.MaxPlayers)
+            {
+                Debug.LogWarning($"[InputSyncerServer] Player tried to join but match is full ({GetJoinedPlayerCount()}/{Options.MaxPlayers})");
+                string errorJson = JsonConvert.SerializeObject(new { reason = "match-full", message = $"Match is full ({Options.MaxPlayers} players max)" });
+                Socket.SendJson(connectionId, InputSyncerEvents.INPUT_SYNCER_CONTENT_ERROR, errorJson);
+                return;
+            }
+
+            string userId = string.IsNullOrWhiteSpace(requestedUserId)
+                ? DefaultAnonymousUserId(connectionId)
+                : requestedUserId.Trim();
+            player.UserId = userId;
+            player.Joined = true;
+
+            OnPlayerJoined?.Invoke(player);
+            Debug.Log($"[InputSyncerServer] Player joined: {player.UserId}");
+
+            if (State.MatchStarted && Options.AllowLateJoin && Options.SendStepHistoryOnLateJoin)
+                SendAllStepsToPlayer(connectionId);
+
+            if (Options.AutoStartWhenFull && !State.MatchStarted && GetJoinedPlayerCount() >= Options.MaxPlayers)
+                StartMatch();
+            else
+                UpdateAbandonDeadline();
         }
 
         private void SendAllStepsToPlayer(int connectionId)
@@ -485,6 +532,18 @@ namespace UnityInputSyncerUTPServer
             State.Players[connectionId] = player;
             OnPlayerConnected?.Invoke(player);
             Debug.Log($"[InputSyncerServer] Client connected: {connectionId}");
+
+            if (!Options.AutoJoinOnConnect)
+                return;
+
+            string handshakeUserId = null;
+            if (pendingHandshakeUserIds.TryGetValue(connectionId, out var u))
+            {
+                handshakeUserId = u;
+                pendingHandshakeUserIds.Remove(connectionId);
+            }
+
+            TryCompleteJoin(connectionId, player, handshakeUserId);
         }
 
         private void OnClientDisconnected(int connectionId)

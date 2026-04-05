@@ -23,6 +23,7 @@ namespace Tests.EditMode
             {
                 MaxPlayers = 4,
                 AutoStartWhenFull = false,
+                AutoJoinOnConnect = false,
                 AllowLateJoin = false,
                 SendStepHistoryOnLateJoin = true,
                 StepIntervalSeconds = 0.1f,
@@ -107,6 +108,26 @@ namespace Tests.EditMode
         // =========================================================
 
         [Test]
+        public void AutoJoinOnConnect_JoinsWithoutExplicitJoinEvent()
+        {
+            server.Dispose();
+            server = new InputSyncerServer(fakeSocket, new InputSyncerServerOptions
+            {
+                MaxPlayers = 4,
+                AutoStartWhenFull = false,
+                AutoJoinOnConnect = true,
+                StepIntervalSeconds = 0.1f,
+            });
+
+            int id = fakeSocket.SimulateClientConnect();
+
+            var player = server.GetPlayers().First();
+            Assert.AreEqual(id, player.ConnectionId);
+            Assert.IsTrue(player.Joined);
+            Assert.IsTrue(player.UserId.StartsWith("player-"));
+        }
+
+        [Test]
         public void Join_MarksPlayerJoined_SetsUserId()
         {
             int id = ConnectAndJoin("alice");
@@ -139,6 +160,18 @@ namespace Tests.EditMode
                 JObject.FromObject(new { userId = "alice" }));
 
             Assert.AreEqual(1, joinCount);
+        }
+
+        [Test]
+        public void Join_UpdatesUserId_WhenAlreadyJoined_BeforeMatchStart()
+        {
+            int id = ConnectAndJoin("alice");
+            fakeSocket.SimulateJsonEvent(id, InputSyncerEvents.MATCH_USER_JOIN_EVENT,
+                JObject.FromObject(new { userId = "charlie" }));
+
+            var player = server.GetPlayers().First();
+            Assert.AreEqual("charlie", player.UserId);
+            Assert.AreEqual(1, server.GetJoinedPlayerCount());
         }
 
         [Test]
@@ -175,6 +208,7 @@ namespace Tests.EditMode
             fakeSocket = new FakeSocketServer();
             server = new InputSyncerServer(fakeSocket, new InputSyncerServerOptions
             {
+                AutoJoinOnConnect = false,
                 AllowLateJoin = true,
                 SendStepHistoryOnLateJoin = false,
             });
@@ -216,6 +250,7 @@ namespace Tests.EditMode
             {
                 MaxPlayers = 2,
                 AutoStartWhenFull = false,
+                AutoJoinOnConnect = false,
             });
 
             ConnectAndJoin("alice");
@@ -248,6 +283,7 @@ namespace Tests.EditMode
             {
                 MaxPlayers = 2,
                 AutoStartWhenFull = false,
+                AutoJoinOnConnect = false,
             });
 
             ConnectAndJoin("alice");
@@ -271,6 +307,7 @@ namespace Tests.EditMode
             {
                 MaxPlayers = 2,
                 AutoStartWhenFull = false,
+                AutoJoinOnConnect = false,
             });
 
             int id1 = ConnectAndJoin("alice");
@@ -296,6 +333,7 @@ namespace Tests.EditMode
                 MaxPlayers = 2,
                 AutoStartWhenFull = false,
                 AllowLateJoin = true,
+                AutoJoinOnConnect = false,
             });
 
             ConnectAndJoin("alice");
@@ -325,6 +363,7 @@ namespace Tests.EditMode
             {
                 MaxPlayers = 2,
                 AutoStartWhenFull = true,
+                AutoJoinOnConnect = false,
             });
 
             ConnectAndJoin("alice");
@@ -343,6 +382,7 @@ namespace Tests.EditMode
             {
                 MaxPlayers = 3,
                 AutoStartWhenFull = true,
+                AutoJoinOnConnect = false,
             });
 
             ConnectAndJoin("alice");
@@ -376,6 +416,7 @@ namespace Tests.EditMode
             {
                 AllowLateJoin = true,
                 SendStepHistoryOnLateJoin = true,
+                AutoJoinOnConnect = false,
             });
 
             int id1 = ConnectAndJoin("alice");
@@ -407,6 +448,7 @@ namespace Tests.EditMode
             {
                 AllowLateJoin = true,
                 SendStepHistoryOnLateJoin = false,
+                AutoJoinOnConnect = false,
             });
 
             int id1 = ConnectAndJoin("alice");
@@ -778,6 +820,24 @@ namespace Tests.EditMode
         }
 
         [Test]
+        public void PlayerSessionFinish_NonObjectDataField_KeepsOuterObjectAsPayload_ParityWithSocketServer()
+        {
+            int id1 = ConnectAndJoin("alice");
+            ConnectAndJoin("bob");
+            server.StartMatch();
+            fakeSocket.ClearSentMessages();
+
+            fakeSocket.SimulateJsonEvent(id1, InputSyncerEvents.MATCH_PLAYER_SESSION_FINISH_EVENT,
+                JObject.FromObject(new { data = "plain" }));
+
+            var msgs = fakeSocket.GetMessagesByEvent(InputSyncerEvents.INPUT_SYNCER_PLAYER_SESSION_FINISH_EVENT);
+            Assert.GreaterOrEqual(msgs.Count, 1);
+            var body = JObject.Parse(msgs[0].Json);
+            Assert.AreEqual("alice", body["userId"]?.ToString());
+            Assert.AreEqual("plain", body["data"]?["data"]?.ToString());
+        }
+
+        [Test]
         public void PlayerSessionFinish_DoesNotFinishMatch()
         {
             int id1 = ConnectAndJoin("alice");
@@ -796,6 +856,7 @@ namespace Tests.EditMode
             {
                 MaxPlayers = 4,
                 AutoStartWhenFull = false,
+                AutoJoinOnConnect = false,
                 QuorumUserFinishEndsMatch = false,
             });
             int id1 = ConnectAndJoin("alice");
@@ -814,10 +875,10 @@ namespace Tests.EditMode
             fakeSocket.ClearSentMessages();
             fakeSocket.SimulateClientDisconnect(id1);
             Assert.IsTrue(server.IsMatchFinished);
+            Assert.AreEqual(InputSyncerFinishReasons.AllDisconnected, server.LastFinishReason);
+            // Last client is removed before FinishMatch; SendJsonToAllJoined targets joined only, so no wire delivery.
             var finishMsgs = fakeSocket.GetMessagesByEvent(InputSyncerEvents.INPUT_SYNCER_FINISH_EVENT);
-            Assert.GreaterOrEqual(finishMsgs.Count, 1);
-            var jo = JObject.Parse(finishMsgs[0].Json);
-            Assert.AreEqual(InputSyncerFinishReasons.AllDisconnected, jo["reason"]?.ToString());
+            Assert.AreEqual(0, finishMsgs.Count);
         }
 
         [Test]

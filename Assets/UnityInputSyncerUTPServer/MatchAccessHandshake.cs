@@ -55,6 +55,36 @@ namespace UnityInputSyncerUTPServer
             }
         }
 
+        /// <summary>Optional <c>userId</c> in handshake JSON (same transport as password/token). Used for auto-join parity with Socket.IO query <c>userId</c>.</summary>
+        public static bool TryGetOptionalUserId(NativeArray<byte> data, out string userId)
+        {
+            userId = null;
+            if (data.Length > MaxPayloadBytes)
+                return false;
+
+            byte[] copy = new byte[data.Length];
+            data.CopyTo(copy);
+            string json = Encoding.UTF8.GetString(copy);
+
+            JObject obj;
+            try
+            {
+                obj = string.IsNullOrWhiteSpace(json)
+                    ? new JObject()
+                    : JObject.Parse(json);
+            }
+            catch
+            {
+                return false;
+            }
+
+            var s = obj["userId"]?.Value<string>();
+            if (string.IsNullOrWhiteSpace(s))
+                return false;
+            userId = s.Trim();
+            return true;
+        }
+
         static bool PasswordEquals(string expected, string actual)
         {
             byte[] e;

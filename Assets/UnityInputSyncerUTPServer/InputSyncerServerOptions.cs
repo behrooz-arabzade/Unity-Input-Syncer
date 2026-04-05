@@ -9,7 +9,10 @@ namespace UnityInputSyncerUTPServer
         public ushort Port = 7777;
         public float HeartbeatTimeout = 15f;
         public int MaxPlayers = 2;
-        public bool AutoStartWhenFull = false;
+        public bool AutoStartWhenFull = true;
+
+        /// <summary>When true (default), joined state is applied on transport connect (after handshake), matching Socket.IO gateway behavior. Set false for explicit <c>join</c> only.</summary>
+        public bool AutoJoinOnConnect = true;
         public float StepIntervalSeconds = 0.1f;
         public bool AllowLateJoin = false;
         public bool SendStepHistoryOnLateJoin = true;
