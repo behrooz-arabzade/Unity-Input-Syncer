@@ -9,12 +9,12 @@
 
 ## Why this project?
 
-| Approach | What Unity Input Syncer does |
-|----------|--------------------------------|
-| **Lockstep** | Syncs **inputs**, not transforms or physics state — clients agree on step *N* and apply the same inputs. |
+| Approach       | What Unity Input Syncer does                                                                                             |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| **Lockstep**   | Syncs **inputs**, not transforms or physics state — clients agree on step _N_ and apply the same inputs.                 |
 | **Transports** | **UDP** via Unity Transport (`UTPClientDriver`) or **WebSocket** via Socket.IO (`SocketIODriver`) behind one client API. |
-| **Servers** | **C#** headless dedicated server from a Unity scene, or a **NestJS** reference server with a matching admin API. |
-| **Dev UX** | **Mock mode** for offline ticks; optional **ECS** helpers (`SyncSimulation`) for prediction and rollback. |
+| **Servers**    | **C#** headless dedicated server from a Unity scene, or a **NestJS** reference server with a matching admin API.         |
+| **Dev UX**     | **Mock mode** for offline ticks; optional **ECS** helpers (`SyncSimulation`) for prediction and rollback.                |
 
 ---
 
@@ -36,11 +36,11 @@ Full setup, APIs, admin HTTP workflows, and environment variables are in **[DOCU
 
 ## Repository layout
 
-| Path | Purpose |
-|------|---------|
+| Path                                                                                                                   | Purpose                                                                                                  |
+| ---------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
 | [`Packages/com.github.behrooz-arabzade.unity-input-syncer/`](Packages/com.github.behrooz-arabzade.unity-input-syncer/) | UPM package: Core, Client, UTP server, SyncSimulation, editor tools, dedicated server scene, `Samples~`. |
-| [`Servers/UnityInputSyncerSocketIOServer/`](Servers/UnityInputSyncerSocketIOServer/) | Reference **NestJS + Socket.IO** server (`npm ci`, `npm run build`, `npm run start:prod`). |
-| [`Assets/`](Assets/) | Template project assets, tests, and demos not shipped as part of the minimal package install. |
+| [`Servers/UnityInputSyncerSocketIOServer/`](Servers/UnityInputSyncerSocketIOServer/)                                   | Reference **NestJS + Socket.IO** server (`npm ci`, `npm run build`, `npm run start:prod`).               |
+| [`Assets/`](Assets/)                                                                                                   | Template project assets, tests, and demos not shipped as part of the minimal package install.            |
 
 This repo is both a **consumable library** (via UPM) and a **development sandbox** for maintainers.
 
@@ -90,8 +90,6 @@ Contributions are welcome: bug reports, docs improvements, and focused pull requ
 1. Open an issue for larger changes so design can be agreed early.
 2. Keep diffs scoped to one concern; match existing code style and assembly layout.
 3. Run **`make test`** (or the Test Runner in Unity) before submitting when your change touches runtime logic.
-
-Please add or choose an open-source **LICENSE** file at the repo root so others know how they may use and redistribute the code ([Choose a License](https://choosealicense.com/)).
 
 ---
 
