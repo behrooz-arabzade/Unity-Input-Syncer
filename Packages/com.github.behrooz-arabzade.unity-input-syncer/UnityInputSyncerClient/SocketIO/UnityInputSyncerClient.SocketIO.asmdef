@@ -1,9 +1,10 @@
 {
-    "name": "UnityInputSyncerClient",
+    "name": "UnityInputSyncerClient.SocketIO",
     "rootNamespace": "",
     "references": [
         "UnityInputSyncerCore",
-        "Unity.Collections"
+        "UnityInputSyncerClient",
+        "SocketIOUnityAssembly"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],

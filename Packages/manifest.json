@@ -2,7 +2,7 @@
   "dependencies": {
     "com.github-glitchenzo.nugetforunity": "https://github.com/GlitchEnzo/NuGetForUnity.git?path=/src/NuGetForUnity",
     "com.github.behrooz-arabzade.unity-input-syncer": "file:com.github.behrooz-arabzade.unity-input-syncer",
-    "com.itisnajim.socketiounity": "1.1.5",
+    "com.itisnajim.socketiounity": "https://github.com/itisnajim/SocketIOUnity.git",
     "com.unity.ai.navigation": "2.0.11",
     "com.unity.collab-proxy": "2.11.4",
     "com.unity.entities": "6.4.0",
@@ -53,14 +53,5 @@
     "com.unity.modules.vr": "1.0.0",
     "com.unity.modules.wind": "1.0.0",
     "com.unity.modules.xr": "1.0.0"
-  },
-  "scopedRegistries": [
-    {
-      "name": "package.openupm.com",
-      "url": "https://package.openupm.com",
-      "scopes": [
-        "com.itisnajim"
-      ]
-    }
-  ]
+  }
 }

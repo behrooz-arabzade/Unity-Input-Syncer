@@ -1,14 +1,13 @@
 {
   "name": "com.github.behrooz-arabzade.unity-input-syncer",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "displayName": "Unity Input Syncer",
-  "description": "Deterministic multiplayer input synchronization for Unity: lockstep steps, UTP and Socket.IO transports, optional UTP headless server and ECS helpers.",
+  "description": "Deterministic multiplayer input synchronization for Unity: lockstep steps, UTP and Socket.IO transports, optional UTP headless server and ECS helpers. Add com.itisnajim.socketiounity to your project manifest (Git URL or OpenUPM); it is not listed as a package dependency because UPM only accepts semver there.",
   "unity": "6000.3",
   "documentationUrl": "https://github.com/behrooz-arabzade/Unity-Input-Syncer/blob/main/DOCUMENTATION.md",
   "dependencies": {
     "com.unity.transport": "2.6.0",
     "com.unity.nuget.newtonsoft-json": "3.2.2",
-    "com.itisnajim.socketiounity": "1.1.5",
     "com.unity.entities": "1.4.5"
   },
   "samples": [

@@ -2,7 +2,8 @@
     "name": "UnityInputSyncer.Client.Samples",
     "rootNamespace": "",
     "references": [
-        "UnityInputSyncerClient"
+        "UnityInputSyncerClient",
+        "UnityInputSyncerClient.SocketIO"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],

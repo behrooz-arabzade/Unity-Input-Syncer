@@ -6,6 +6,7 @@
         "UnityEditor.TestRunner",
         "UnityInputSyncerCore",
         "UnityInputSyncerClient",
+        "UnityInputSyncerClient.SocketIO",
         "UnityInputSyncerUTPServer",
         "TestHelpers",
         "Unity.Collections",
