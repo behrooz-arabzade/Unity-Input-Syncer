@@ -8,7 +8,7 @@
   "dependencies": {
     "com.unity.transport": "2.6.0",
     "com.unity.nuget.newtonsoft-json": "3.2.2",
-    "com.itisnajim.socketiounity": "https://github.com/itisnajim/SocketIOUnity.git",
+    "com.itisnajim.socketiounity": "1.1.5",
     "com.unity.entities": "1.4.5"
   },
   "samples": [
