@@ -18,7 +18,6 @@ namespace SyncSimulation
         readonly RollbackSnapshotStore _snapshots;
         readonly List<object> _stepInputs = new();
         int _completedSimStep = -1;
-        int _nextRollbackId = 1;
         int _stepBeingSimulated;
         Entity _singleton;
         SimulationInputBridgeSystem _bridge;
@@ -41,6 +40,8 @@ namespace SyncSimulation
             _singleton = EntityManager.CreateEntity(
                 typeof(SimulationSingletonTag),
                 typeof(SimulationStepState));
+            EntityManager.AddComponentData(_singleton,
+                new SimulationRollbackSpawnState { NextRollbackEntityId = 1 });
             EntityManager.AddBuffer<JsonInputEventElement>(_singleton);
 
             _snapshots.RecordSnapshotAfterCompletedStep(EntityManager, -1);
@@ -92,8 +93,12 @@ namespace SyncSimulation
         /// </summary>
         public Entity CreateSimEntity()
         {
+            var spawn = EntityManager.GetComponentData<SimulationRollbackSpawnState>(_singleton);
+            var id = spawn.NextRollbackEntityId;
+            spawn.NextRollbackEntityId = id + 1;
+            EntityManager.SetComponentData(_singleton, spawn);
             var e = EntityManager.CreateEntity();
-            EntityManager.AddComponentData(e, new RollbackEntityId { Value = _nextRollbackId++ });
+            EntityManager.AddComponentData(e, new RollbackEntityId { Value = id });
             EntityManager.AddComponentData(e, new SpawnedOnStep { Value = _stepBeingSimulated });
             return e;
         }
@@ -165,7 +170,8 @@ namespace SyncSimulation
             using var arr = q.ToComponentDataArray<RollbackEntityId>(Allocator.Temp);
             for (var i = 0; i < arr.Length; i++)
                 max = Mathf.Max(max, arr[i].Value);
-            _nextRollbackId = max + 1;
+            EntityManager.SetComponentData(_singleton,
+                new SimulationRollbackSpawnState { NextRollbackEntityId = max + 1 });
         }
 
         public void Dispose()

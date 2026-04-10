@@ -19,6 +19,15 @@ namespace SyncSimulation
         public SimulationPhase Phase;
     }
 
+    /// <summary>
+    /// Next id for <see cref="RollbackEntityId"/> on entities created via <see cref="SyncSimulationHost.CreateSimEntity"/>.
+    /// Lives on the simulation singleton so Burst gameplay systems can spawn rollback-tracked entities without managed host calls.
+    /// </summary>
+    public struct SimulationRollbackSpawnState : IComponentData
+    {
+        public int NextRollbackEntityId;
+    }
+
     public enum SimulationPhase : byte
     {
         Authoritative = 0,
