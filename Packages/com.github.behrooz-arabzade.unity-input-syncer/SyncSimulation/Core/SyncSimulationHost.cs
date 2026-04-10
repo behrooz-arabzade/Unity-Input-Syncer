@@ -80,6 +80,14 @@ namespace SyncSimulation
         }
 
         /// <summary>
+        /// Registers a <see cref="DynamicBuffer{T}"/> element type for rollback snapshots (same entities as rollback components).
+        /// </summary>
+        public void RegisterRollbackBuffer<T>() where T : unmanaged, IBufferElementData
+        {
+            _snapshots.RegisterBuffer<T>();
+        }
+
+        /// <summary>
         /// Creates an entity tracked for rollback. Requires <see cref="RegisterRollbackComponent{T}"/> for all sim state on the entity.
         /// </summary>
         public Entity CreateSimEntity()

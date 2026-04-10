@@ -65,7 +65,88 @@ namespace SyncSimulation
     /// </summary>
     public sealed class RollbackSnapshotStore : IDisposable
     {
+        /// <summary>Snapshot blob starts with this uint, then entity count (int), then per-entity records with buffer masks.</summary>
+        public const uint SnapshotFormatV2Marker = 0x53494D32u;
+
+        interface IRollbackBufferOps
+        {
+            bool HasBuffer(EntityManager em, Entity e);
+            void Append(EntityManager em, Entity e, NativeList<byte> blob);
+            void SkipPayload(NativeArray<byte> blob, ref int offset);
+            void RestoreOrAdd(EntityManager em, Entity e, ref int offset, NativeArray<byte> blob);
+            void RemoveIfPresent(EntityManager em, Entity e);
+        }
+
+        sealed class RollbackBufferOps<T> : IRollbackBufferOps where T : unmanaged, IBufferElementData
+        {
+            public bool HasBuffer(EntityManager em, Entity e) => em.HasBuffer<T>(e);
+
+            public void Append(EntityManager em, Entity e, NativeList<byte> blob)
+            {
+                var buf = em.GetBuffer<T>(e);
+                var len = buf.Length;
+                AppendInt(blob, len);
+                var es = UnsafeUtility.SizeOf<T>();
+                for (var i = 0; i < len; i++)
+                {
+                    var data = buf[i];
+                    unsafe
+                    {
+                        var p = (byte*)UnsafeUtility.AddressOf(ref data);
+                        for (var j = 0; j < es; j++)
+                            blob.Add(p[j]);
+                    }
+                }
+            }
+
+            public void SkipPayload(NativeArray<byte> blob, ref int offset)
+            {
+                var len = ReadInt(blob, ref offset);
+                if (len < 0)
+                    throw new InvalidOperationException("Rollback snapshot corrupt.");
+                var es = UnsafeUtility.SizeOf<T>();
+                var bytes = len * es;
+                if (offset + bytes > blob.Length)
+                    throw new InvalidOperationException("Rollback snapshot truncated.");
+                offset += bytes;
+            }
+
+            public void RestoreOrAdd(EntityManager em, Entity e, ref int offset, NativeArray<byte> blob)
+            {
+                var len = ReadInt(blob, ref offset);
+                if (len < 0)
+                    throw new InvalidOperationException("Rollback snapshot corrupt.");
+                var es = UnsafeUtility.SizeOf<T>();
+                if (offset + len * es > blob.Length)
+                    throw new InvalidOperationException("Rollback snapshot truncated.");
+                if (!em.HasBuffer<T>(e))
+                    em.AddBuffer<T>(e);
+                var buf = em.GetBuffer<T>(e);
+                buf.ResizeUninitialized(len);
+                for (var i = 0; i < len; i++)
+                {
+                    T data = default;
+                    unsafe
+                    {
+                        var p = (byte*)UnsafeUtility.AddressOf(ref data);
+                        for (var j = 0; j < es; j++)
+                            p[j] = blob[offset + j];
+                        offset += es;
+                    }
+
+                    buf[i] = data;
+                }
+            }
+
+            public void RemoveIfPresent(EntityManager em, Entity e)
+            {
+                if (em.HasBuffer<T>(e))
+                    em.RemoveComponent<T>(e);
+            }
+        }
+
         readonly List<IRollbackComponentOps> _ops = new();
+        readonly List<IRollbackBufferOps> _bufferOps = new();
         readonly int _capacity;
         readonly NativeList<byte>[] _blobs;
         readonly int[] _blobStep;
@@ -83,6 +164,12 @@ namespace SyncSimulation
         public void RegisterComponent<T>() where T : unmanaged, IComponentData
         {
             _ops.Add(new RollbackOps<T>());
+        }
+
+        /// <summary>Registers a <see cref="DynamicBuffer{T}"/> type for rollback (same entity set as rollback components).</summary>
+        public void RegisterBuffer<T>() where T : unmanaged, IBufferElementData
+        {
+            _bufferOps.Add(new RollbackBufferOps<T>());
         }
 
         int SlotForStep(int completedStep)
@@ -158,6 +245,7 @@ namespace SyncSimulation
             var order = Enumerable.Range(0, entities.Length).OrderBy(i => ids[i].Value).ToArray();
 
             var count = order.Length;
+            AppendUInt(blob, SnapshotFormatV2Marker);
             AppendInt(blob, count);
 
             foreach (var idx in order)
@@ -177,10 +265,25 @@ namespace SyncSimulation
 
                 AppendUInt(blob, mask);
 
+                uint bufferMask = 0;
+                for (var bi = 0; bi < _bufferOps.Count; bi++)
+                {
+                    if (_bufferOps[bi].HasBuffer(em, e))
+                        bufferMask |= 1u << bi;
+                }
+
+                AppendUInt(blob, bufferMask);
+
                 for (var oi = 0; oi < _ops.Count; oi++)
                 {
                     if ((mask & (1u << oi)) != 0)
                         _ops[oi].Append(em, e, blob);
+                }
+
+                for (var bi = 0; bi < _bufferOps.Count; bi++)
+                {
+                    if ((bufferMask & (1u << bi)) != 0)
+                        _bufferOps[bi].Append(em, e, blob);
                 }
             }
         }
@@ -188,14 +291,25 @@ namespace SyncSimulation
         void Restore(EntityManager em, NativeArray<byte> blob)
         {
             var offset = 0;
-            var count = ReadInt(blob, ref offset);
-            var records = new List<(int id, int spawned, uint mask, int payloadStart)>(count);
+            var head = ReadUInt(blob, ref offset);
+            int count;
+            var formatV2 = head == SnapshotFormatV2Marker;
+            if (formatV2)
+                count = ReadInt(blob, ref offset);
+            else
+            {
+                offset = 0;
+                count = ReadInt(blob, ref offset);
+            }
+
+            var records = new List<(int id, int spawned, uint mask, uint bufferMask, int payloadStart)>(count);
 
             for (var i = 0; i < count; i++)
             {
                 var id = ReadInt(blob, ref offset);
                 var spawned = ReadInt(blob, ref offset);
                 var mask = ReadUInt(blob, ref offset);
+                var bufferMask = formatV2 ? ReadUInt(blob, ref offset) : 0u;
                 var payloadStart = offset;
                 for (var oi = 0; oi < _ops.Count; oi++)
                 {
@@ -203,7 +317,13 @@ namespace SyncSimulation
                         offset += _ops[oi].SizeOf;
                 }
 
-                records.Add((id, spawned, mask, payloadStart));
+                for (var bi = 0; bi < _bufferOps.Count; bi++)
+                {
+                    if ((bufferMask & (1u << bi)) != 0)
+                        _bufferOps[bi].SkipPayload(blob, ref offset);
+                }
+
+                records.Add((id, spawned, mask, bufferMask, payloadStart));
             }
 
             var idSet = new HashSet<int>(records.Select(r => r.id));
@@ -248,11 +368,23 @@ namespace SyncSimulation
                         _ops[oi].RemoveIfPresent(em, entity);
                 }
 
+                for (var bi = 0; bi < _bufferOps.Count; bi++)
+                {
+                    if ((rec.bufferMask & (1u << bi)) == 0)
+                        _bufferOps[bi].RemoveIfPresent(em, entity);
+                }
+
                 var off = rec.payloadStart;
                 for (var oi = 0; oi < _ops.Count; oi++)
                 {
                     if ((rec.mask & (1u << oi)) != 0)
                         _ops[oi].RestoreOrAdd(em, entity, ref off, blob);
+                }
+
+                for (var bi = 0; bi < _bufferOps.Count; bi++)
+                {
+                    if ((rec.bufferMask & (1u << bi)) != 0)
+                        _bufferOps[bi].RestoreOrAdd(em, entity, ref off, blob);
                 }
             }
         }
