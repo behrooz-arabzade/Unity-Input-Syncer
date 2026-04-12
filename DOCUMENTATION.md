@@ -20,7 +20,9 @@ A Unity 6 library for deterministic multiplayer input synchronization using lock
 
 ## Introduction
 
-Unity Input Syncer provides a client-side SDK and server components for synchronizing player inputs across clients in a deterministic lockstep simulation. Instead of syncing game state, it synchronizes _inputs_ — the server collects all player inputs each tick, batches them into numbered "steps," and broadcasts them to every client. Each client then replays the same inputs in the same order, producing identical simulation results.
+Unity Input Syncer provides a client-side SDK and server components for synchronizing player inputs across clients in a deterministic lockstep simulation.
+
+**Package scope:** see [`PACKAGE_SCOPE.md`](PACKAGE_SCOPE.md) — transport, match instances, and `SyncSimulation` only; no gameplay rules. Instead of syncing game state, it synchronizes _inputs_ — the server collects all player inputs each tick, batches them into numbered "steps," and broadcasts them to every client. Each client then replays the same inputs in the same order, producing identical simulation results.
 
 ### Key Highlights
 
