@@ -21,31 +21,43 @@ namespace SyncSimulation
     {
         public ComponentType Type => ComponentType.ReadWrite<T>();
 
-        public int SizeOf => UnsafeUtility.SizeOf<T>();
+        // Match serialized width to ECS (tags are zero-sized in TypeManager; CLR may still size the struct as 1 byte).
+        public int SizeOf => Type.IsZeroSized ? 0 : UnsafeUtility.SizeOf<T>();
 
         public bool HasComponent(EntityManager em, Entity e) => em.HasComponent<T>(e);
 
         public void Append(EntityManager em, Entity e, NativeList<byte> blob)
         {
+            if (SizeOf == 0)
+                return;
             var data = em.GetComponentData<T>(e);
+            var copyBytes = UnsafeUtility.SizeOf<T>();
             unsafe
             {
                 var p = (byte*)UnsafeUtility.AddressOf(ref data);
-                for (var i = 0; i < SizeOf; i++)
+                for (var i = 0; i < copyBytes; i++)
                     blob.Add(p[i]);
             }
         }
 
         public void RestoreOrAdd(EntityManager em, Entity e, ref int offset, NativeArray<byte> blob)
         {
-            if (offset + SizeOf > blob.Length)
+            if (SizeOf == 0)
+            {
+                if (!em.HasComponent<T>(e))
+                    em.AddComponentData<T>(e, default);
+                return;
+            }
+
+            var copyBytes = UnsafeUtility.SizeOf<T>();
+            if (offset + copyBytes > blob.Length)
                 throw new InvalidOperationException("Rollback snapshot truncated.");
             unsafe
             {
                 var src = (byte*)blob.GetUnsafeReadOnlyPtr() + offset;
                 T data = default;
-                UnsafeUtility.MemCpy(UnsafeUtility.AddressOf(ref data), src, SizeOf);
-                offset += SizeOf;
+                UnsafeUtility.MemCpy(UnsafeUtility.AddressOf(ref data), src, copyBytes);
+                offset += copyBytes;
                 if (em.HasComponent<T>(e))
                     em.SetComponentData(e, data);
                 else
@@ -67,6 +79,9 @@ namespace SyncSimulation
     {
         /// <summary>Snapshot blob starts with this uint, then entity count (int), then per-entity records with buffer masks.</summary>
         public const uint SnapshotFormatV2Marker = 0x53494D32u;
+
+        /// <summary>V3: same as V2 but component presence uses <see cref="ulong"/> (64 types). V2 uint mask shifts wrap at 32 and corrupt snapshots.</summary>
+        public const uint SnapshotFormatV3Marker = 0x53494D33u;
 
         interface IRollbackBufferOps
         {
@@ -245,7 +260,11 @@ namespace SyncSimulation
             var order = Enumerable.Range(0, entities.Length).OrderBy(i => ids[i].Value).ToArray();
 
             var count = order.Length;
-            AppendUInt(blob, SnapshotFormatV2Marker);
+            if (_ops.Count > 64)
+                throw new InvalidOperationException(
+                    "RollbackSnapshotStore supports at most 64 registered rollback component types; extend the snapshot format.");
+
+            AppendUInt(blob, SnapshotFormatV3Marker);
             AppendInt(blob, count);
 
             foreach (var idx in order)
@@ -256,14 +275,14 @@ namespace SyncSimulation
                 AppendInt(blob, id);
                 AppendInt(blob, sp);
 
-                uint mask = 0;
+                ulong mask = 0;
                 for (var oi = 0; oi < _ops.Count; oi++)
                 {
                     if (_ops[oi].HasComponent(em, e))
-                        mask |= 1u << oi;
+                        mask |= 1ul << oi;
                 }
 
-                AppendUInt(blob, mask);
+                AppendULong(blob, mask);
 
                 uint bufferMask = 0;
                 for (var bi = 0; bi < _bufferOps.Count; bi++)
@@ -276,7 +295,7 @@ namespace SyncSimulation
 
                 for (var oi = 0; oi < _ops.Count; oi++)
                 {
-                    if ((mask & (1u << oi)) != 0)
+                    if ((mask & (1ul << oi)) != 0)
                         _ops[oi].Append(em, e, blob);
                 }
 
@@ -293,8 +312,9 @@ namespace SyncSimulation
             var offset = 0;
             var head = ReadUInt(blob, ref offset);
             int count;
+            var formatV3 = head == SnapshotFormatV3Marker;
             var formatV2 = head == SnapshotFormatV2Marker;
-            if (formatV2)
+            if (formatV3 || formatV2)
                 count = ReadInt(blob, ref offset);
             else
             {
@@ -302,18 +322,18 @@ namespace SyncSimulation
                 count = ReadInt(blob, ref offset);
             }
 
-            var records = new List<(int id, int spawned, uint mask, uint bufferMask, int payloadStart)>(count);
+            var records = new List<(int id, int spawned, ulong mask, uint bufferMask, int payloadStart)>(count);
 
             for (var i = 0; i < count; i++)
             {
                 var id = ReadInt(blob, ref offset);
                 var spawned = ReadInt(blob, ref offset);
-                var mask = ReadUInt(blob, ref offset);
-                var bufferMask = formatV2 ? ReadUInt(blob, ref offset) : 0u;
+                ulong mask = formatV3 ? ReadULong(blob, ref offset) : ReadUInt(blob, ref offset);
+                var bufferMask = formatV2 || formatV3 ? ReadUInt(blob, ref offset) : 0u;
                 var payloadStart = offset;
                 for (var oi = 0; oi < _ops.Count; oi++)
                 {
-                    if ((mask & (1u << oi)) != 0)
+                    if ((mask & (1ul << oi)) != 0)
                         offset += _ops[oi].SizeOf;
                 }
 
@@ -364,7 +384,7 @@ namespace SyncSimulation
 
                 for (var oi = 0; oi < _ops.Count; oi++)
                 {
-                    if ((rec.mask & (1u << oi)) == 0)
+                    if ((rec.mask & (1ul << oi)) == 0)
                         _ops[oi].RemoveIfPresent(em, entity);
                 }
 
@@ -377,7 +397,7 @@ namespace SyncSimulation
                 var off = rec.payloadStart;
                 for (var oi = 0; oi < _ops.Count; oi++)
                 {
-                    if ((rec.mask & (1u << oi)) != 0)
+                    if ((rec.mask & (1ul << oi)) != 0)
                         _ops[oi].RestoreOrAdd(em, entity, ref off, blob);
                 }
 
@@ -415,6 +435,23 @@ namespace SyncSimulation
             blob.Add((byte)((v >> 8) & 0xFF));
             blob.Add((byte)((v >> 16) & 0xFF));
             blob.Add((byte)((v >> 24) & 0xFF));
+        }
+
+        static void AppendULong(NativeList<byte> blob, ulong v)
+        {
+            for (var i = 0; i < 8; i++)
+                blob.Add((byte)((v >> (8 * i)) & 0xFF));
+        }
+
+        static ulong ReadULong(NativeArray<byte> blob, ref int offset)
+        {
+            if (offset + 8 > blob.Length)
+                throw new InvalidOperationException("Rollback snapshot corrupt.");
+            ulong v = 0;
+            for (var i = 0; i < 8; i++)
+                v |= (ulong)blob[offset + i] << (8 * i);
+            offset += 8;
+            return v;
         }
 
         static int ReadInt(NativeArray<byte> blob, ref int offset)
