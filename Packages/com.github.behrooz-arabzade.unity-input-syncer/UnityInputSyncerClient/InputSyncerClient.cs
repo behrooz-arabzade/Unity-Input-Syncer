@@ -73,6 +73,7 @@ namespace UnityInputSyncerClient
         private ConcurrentQueue<BaseInputData> ReadyInputToSend = new ConcurrentQueue<BaseInputData>();
         private void RunMockInterval()
         {
+            _ = UnityThreadDispatcher.Instance;
             CancellationTokenSource = new CancellationTokenSource();
             var token = CancellationTokenSource.Token;
 

@@ -32,11 +32,11 @@ namespace SyncSimulation
             foreach (var o in PendingInputs)
             {
                 var json = StepInputJson.ToJson(o);
-                var fs = new FixedString512Bytes();
+                var fs = new FixedString4096Bytes();
                 if (json.Length > fs.Capacity)
                     Debug.LogWarning(
-                        $"[SyncSimulation] Input JSON length {json.Length} exceeds FixedString512 capacity; truncating.");
-                fs = new FixedString512Bytes(json);
+                        $"[SyncSimulation] Input JSON length {json.Length} exceeds FixedString4096 capacity; truncating.");
+                fs = new FixedString4096Bytes(json);
                 buffer.Add(new JsonInputEventElement { Json = fs });
             }
         }

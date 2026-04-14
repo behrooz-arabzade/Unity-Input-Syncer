@@ -55,6 +55,6 @@ namespace SyncSimulation
     /// </summary>
     public struct JsonInputEventElement : IBufferElementData
     {
-        public FixedString512Bytes Json;
+        public FixedString4096Bytes Json;
     }
 }
