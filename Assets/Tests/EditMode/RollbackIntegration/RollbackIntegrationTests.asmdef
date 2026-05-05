@@ -1,0 +1,32 @@
+{
+    "name": "RollbackIntegrationTests",
+    "rootNamespace": "Tests.RollbackIntegration",
+    "references": [
+        "UnityEngine.TestRunner",
+        "UnityEditor.TestRunner",
+        "SyncSimulation",
+        "UnityInputSyncerClient",
+        "Unity.Collections",
+        "Unity.Entities",
+        "Unity.Mathematics",
+        "Unity.Burst",
+        "Unity.PerformanceTesting",
+        "TestHelpers"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": true,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "nunit.framework.dll",
+        "Newtonsoft.Json.dll"
+    ],
+    "autoReferenced": false,
+    "defineConstraints": [
+        "UNITY_INCLUDE_TESTS"
+    ],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

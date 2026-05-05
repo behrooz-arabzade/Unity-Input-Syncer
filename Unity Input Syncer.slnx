@@ -9,5 +9,6 @@
   <Project Path="EditModeTests.csproj" />
   <Project Path="UnityInputSyncerClient.SocketIO.csproj" />
   <Project Path="PlayModeTests.csproj" />
+  <Project Path="RollbackIntegrationTests.csproj" />
   <Project Path="Assembly-CSharp.csproj" />
 </Solution>

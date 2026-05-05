@@ -19,7 +19,8 @@ namespace UnityInputSyncerCore.Utils
                 {
                     var go = new GameObject("UnityThreadDispatcher");
                     _instance = go.AddComponent<UnityThreadDispatcher>();
-                    DontDestroyOnLoad(go);
+                    if (Application.isPlaying)
+                        DontDestroyOnLoad(go);
                 }
                 return _instance;
             }
@@ -30,7 +31,8 @@ namespace UnityInputSyncerCore.Utils
             if (_instance == null)
             {
                 _instance = this;
-                DontDestroyOnLoad(gameObject);
+                if (Application.isPlaying)
+                    DontDestroyOnLoad(gameObject);
             }
             else if (_instance != this)
             {
