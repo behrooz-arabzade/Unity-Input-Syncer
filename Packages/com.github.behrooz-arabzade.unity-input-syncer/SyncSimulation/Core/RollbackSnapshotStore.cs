@@ -21,7 +21,6 @@ namespace SyncSimulation
     {
         public ComponentType Type => ComponentType.ReadWrite<T>();
 
-        // Match serialized width to ECS (tags are zero-sized in TypeManager; CLR may still size the struct as 1 byte).
         public int SizeOf => Type.IsZeroSized ? 0 : UnsafeUtility.SizeOf<T>();
 
         public bool HasComponent(EntityManager em, Entity e) => em.HasComponent<T>(e);
@@ -77,11 +76,11 @@ namespace SyncSimulation
     /// </summary>
     public sealed class RollbackSnapshotStore : IDisposable
     {
-        /// <summary>Snapshot blob starts with this uint, then entity count (int), then per-entity records with buffer masks.</summary>
         public const uint SnapshotFormatV2Marker = 0x53494D32u;
-
-        /// <summary>V3: same as V2 but component presence uses <see cref="ulong"/> (64 types). V2 uint mask shifts wrap at 32 and corrupt snapshots.</summary>
         public const uint SnapshotFormatV3Marker = 0x53494D33u;
+
+        /// <summary>V4: component presence uses two ulongs (128 types), buffer mask uses ulong (64 buffers).</summary>
+        public const uint SnapshotFormatV4Marker = 0x53494D34u;
 
         interface IRollbackBufferOps
         {
@@ -181,7 +180,6 @@ namespace SyncSimulation
             _ops.Add(new RollbackOps<T>());
         }
 
-        /// <summary>Registers a <see cref="DynamicBuffer{T}"/> type for rollback (same entity set as rollback components).</summary>
         public void RegisterBuffer<T>() where T : unmanaged, IBufferElementData
         {
             _bufferOps.Add(new RollbackBufferOps<T>());
@@ -226,9 +224,6 @@ namespace SyncSimulation
             return true;
         }
 
-        /// <summary>
-        /// Restores rollback state after the given completed step, then culls entities spawned strictly after that step.
-        /// </summary>
         public void RestoreAfterCompletedStep(EntityManager em, int completedStep)
         {
             if (!TryGetSnapshotBlobForCompletedStep(completedStep, out var arr))
@@ -250,6 +245,21 @@ namespace SyncSimulation
             }
         }
 
+        static bool GetBit(ulong lo, ulong hi, int index)
+        {
+            return index < 64
+                ? (lo & (1ul << index)) != 0
+                : (hi & (1ul << (index - 64))) != 0;
+        }
+
+        static void SetBit(ref ulong lo, ref ulong hi, int index)
+        {
+            if (index < 64)
+                lo |= 1ul << index;
+            else
+                hi |= 1ul << (index - 64);
+        }
+
         void Capture(EntityManager em, NativeList<byte> blob)
         {
             using var q = em.CreateEntityQuery(typeof(RollbackEntityId), typeof(SpawnedOnStep));
@@ -260,11 +270,14 @@ namespace SyncSimulation
             var order = Enumerable.Range(0, entities.Length).OrderBy(i => ids[i].Value).ToArray();
 
             var count = order.Length;
-            if (_ops.Count > 64)
+            if (_ops.Count > 128)
                 throw new InvalidOperationException(
-                    "RollbackSnapshotStore supports at most 64 registered rollback component types; extend the snapshot format.");
+                    "RollbackSnapshotStore supports at most 128 registered rollback component types.");
+            if (_bufferOps.Count > 64)
+                throw new InvalidOperationException(
+                    "RollbackSnapshotStore supports at most 64 registered rollback buffer types.");
 
-            AppendUInt(blob, SnapshotFormatV3Marker);
+            AppendUInt(blob, SnapshotFormatV4Marker);
             AppendInt(blob, count);
 
             foreach (var idx in order)
@@ -275,33 +288,34 @@ namespace SyncSimulation
                 AppendInt(blob, id);
                 AppendInt(blob, sp);
 
-                ulong mask = 0;
+                ulong maskLo = 0, maskHi = 0;
                 for (var oi = 0; oi < _ops.Count; oi++)
                 {
                     if (_ops[oi].HasComponent(em, e))
-                        mask |= 1ul << oi;
+                        SetBit(ref maskLo, ref maskHi, oi);
                 }
 
-                AppendULong(blob, mask);
+                AppendULong(blob, maskLo);
+                AppendULong(blob, maskHi);
 
-                uint bufferMask = 0;
+                ulong bufferMask = 0;
                 for (var bi = 0; bi < _bufferOps.Count; bi++)
                 {
                     if (_bufferOps[bi].HasBuffer(em, e))
-                        bufferMask |= 1u << bi;
+                        bufferMask |= 1ul << bi;
                 }
 
-                AppendUInt(blob, bufferMask);
+                AppendULong(blob, bufferMask);
 
                 for (var oi = 0; oi < _ops.Count; oi++)
                 {
-                    if ((mask & (1ul << oi)) != 0)
+                    if (GetBit(maskLo, maskHi, oi))
                         _ops[oi].Append(em, e, blob);
                 }
 
                 for (var bi = 0; bi < _bufferOps.Count; bi++)
                 {
-                    if ((bufferMask & (1u << bi)) != 0)
+                    if ((bufferMask & (1ul << bi)) != 0)
                         _bufferOps[bi].Append(em, e, blob);
                 }
             }
@@ -312,9 +326,10 @@ namespace SyncSimulation
             var offset = 0;
             var head = ReadUInt(blob, ref offset);
             int count;
+            var formatV4 = head == SnapshotFormatV4Marker;
             var formatV3 = head == SnapshotFormatV3Marker;
             var formatV2 = head == SnapshotFormatV2Marker;
-            if (formatV3 || formatV2)
+            if (formatV4 || formatV3 || formatV2)
                 count = ReadInt(blob, ref offset);
             else
             {
@@ -322,28 +337,54 @@ namespace SyncSimulation
                 count = ReadInt(blob, ref offset);
             }
 
-            var records = new List<(int id, int spawned, ulong mask, uint bufferMask, int payloadStart)>(count);
+            var records = new List<(int id, int spawned, ulong maskLo, ulong maskHi, ulong bufferMask, int payloadStart)>(count);
 
             for (var i = 0; i < count; i++)
             {
                 var id = ReadInt(blob, ref offset);
                 var spawned = ReadInt(blob, ref offset);
-                ulong mask = formatV3 ? ReadULong(blob, ref offset) : ReadUInt(blob, ref offset);
-                var bufferMask = formatV2 || formatV3 ? ReadUInt(blob, ref offset) : 0u;
+                ulong maskLo, maskHi;
+                ulong bufferMask;
+
+                if (formatV4)
+                {
+                    maskLo = ReadULong(blob, ref offset);
+                    maskHi = ReadULong(blob, ref offset);
+                    bufferMask = ReadULong(blob, ref offset);
+                }
+                else if (formatV3)
+                {
+                    maskLo = ReadULong(blob, ref offset);
+                    maskHi = 0;
+                    bufferMask = ReadUInt(blob, ref offset);
+                }
+                else if (formatV2)
+                {
+                    maskLo = ReadUInt(blob, ref offset);
+                    maskHi = 0;
+                    bufferMask = ReadUInt(blob, ref offset);
+                }
+                else
+                {
+                    maskLo = 0;
+                    maskHi = 0;
+                    bufferMask = 0;
+                }
+
                 var payloadStart = offset;
                 for (var oi = 0; oi < _ops.Count; oi++)
                 {
-                    if ((mask & (1ul << oi)) != 0)
+                    if (GetBit(maskLo, maskHi, oi))
                         offset += _ops[oi].SizeOf;
                 }
 
                 for (var bi = 0; bi < _bufferOps.Count; bi++)
                 {
-                    if ((bufferMask & (1u << bi)) != 0)
+                    if ((bufferMask & (1ul << bi)) != 0)
                         _bufferOps[bi].SkipPayload(blob, ref offset);
                 }
 
-                records.Add((id, spawned, mask, bufferMask, payloadStart));
+                records.Add((id, spawned, maskLo, maskHi, bufferMask, payloadStart));
             }
 
             var idSet = new HashSet<int>(records.Select(r => r.id));
@@ -384,26 +425,26 @@ namespace SyncSimulation
 
                 for (var oi = 0; oi < _ops.Count; oi++)
                 {
-                    if ((rec.mask & (1ul << oi)) == 0)
+                    if (!GetBit(rec.maskLo, rec.maskHi, oi))
                         _ops[oi].RemoveIfPresent(em, entity);
                 }
 
                 for (var bi = 0; bi < _bufferOps.Count; bi++)
                 {
-                    if ((rec.bufferMask & (1u << bi)) == 0)
+                    if ((rec.bufferMask & (1ul << bi)) == 0)
                         _bufferOps[bi].RemoveIfPresent(em, entity);
                 }
 
                 var off = rec.payloadStart;
                 for (var oi = 0; oi < _ops.Count; oi++)
                 {
-                    if ((rec.mask & (1ul << oi)) != 0)
+                    if (GetBit(rec.maskLo, rec.maskHi, oi))
                         _ops[oi].RestoreOrAdd(em, entity, ref off, blob);
                 }
 
                 for (var bi = 0; bi < _bufferOps.Count; bi++)
                 {
-                    if ((rec.bufferMask & (1u << bi)) != 0)
+                    if ((rec.bufferMask & (1ul << bi)) != 0)
                         _bufferOps[bi].RestoreOrAdd(em, entity, ref off, blob);
                 }
             }
