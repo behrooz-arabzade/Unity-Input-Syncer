@@ -73,6 +73,15 @@ namespace SyncSimulation
         }
 
         /// <summary>
+        /// Adds an unmanaged <see cref="ISystem"/> to the simulation group. Call <see cref="World.CreateSystem{T}"/> first.
+        /// </summary>
+        public void AddSystemToSimulation(SystemHandle handle)
+        {
+            _simGroup.AddSystemToUpdateList(handle);
+            _simGroup.SortSystems();
+        }
+
+        /// <summary>
         /// Registers a blittable <see cref="IComponentData"/> type to include in rollback snapshots.
         /// </summary>
         public void RegisterRollbackComponent<T>() where T : unmanaged, IComponentData
