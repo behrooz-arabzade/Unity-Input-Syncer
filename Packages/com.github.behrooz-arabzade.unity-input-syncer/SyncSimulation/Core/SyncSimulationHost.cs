@@ -188,7 +188,8 @@ namespace SyncSimulation
             if (_disposed) return;
             _disposed = true;
             _snapshots.Dispose();
-            World?.Dispose();
+            if (World.IsCreated)
+                World.Dispose();
         }
     }
 }
