@@ -48,6 +48,7 @@ export interface AdminCreateInstanceRequest {
   autoStartWhenFull?: boolean;
   allowLateJoin?: boolean;
   sendStepHistoryOnLateJoin?: boolean;
+  disconnectAbandonTimeoutSeconds?: number;
   matchAccess?: string;
   matchPassword?: string;
   allowedMatchTokens?: string[];

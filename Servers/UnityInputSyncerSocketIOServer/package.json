@@ -8,7 +8,9 @@
     "start": "nest start",
     "start:dev": "nest start --watch",
     "start:prod": "node dist/main.js",
-    "start:cluster": "node dist/cluster-primary.js"
+    "start:cluster": "node dist/cluster-primary.js",
+    "test": "jest --forceExit",
+    "test:integration": "jest --testPathPattern=tests/ --forceExit"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.0",

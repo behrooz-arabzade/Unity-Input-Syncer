@@ -228,9 +228,13 @@ export class MatchGateway
     const instanceId = this.socketToInstance.get(socket.id);
     if (!instanceId) return;
 
-    const instance = this.pool.getInstance(instanceId);
-    if (instance) {
-      instance.server.handlePlayerDisconnect(socket.id);
+    try {
+      const instance = this.pool.getInstance(instanceId);
+      if (instance) {
+        instance.server.handlePlayerDisconnect(socket.id);
+      }
+    } catch {
+      // Pool may already be disposed during shutdown
     }
 
     this.socketToInstance.delete(socket.id);

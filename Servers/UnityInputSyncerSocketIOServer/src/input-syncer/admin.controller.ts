@@ -43,6 +43,8 @@ function overridesFromCreateBody(
   if (body.allowLateJoin !== undefined) o.allowLateJoin = body.allowLateJoin;
   if (body.sendStepHistoryOnLateJoin !== undefined)
     o.sendStepHistoryOnLateJoin = body.sendStepHistoryOnLateJoin;
+  if (body.disconnectAbandonTimeoutSeconds !== undefined)
+    o.disconnectAbandonTimeoutSeconds = body.disconnectAbandonTimeoutSeconds;
   if (body.matchAccess !== undefined)
     o.matchAccess = body.matchAccess as 'open' | 'password' | 'token';
   if (body.matchPassword !== undefined) o.matchPassword = body.matchPassword;

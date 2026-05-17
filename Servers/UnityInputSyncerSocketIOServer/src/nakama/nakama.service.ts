@@ -13,7 +13,7 @@ export class NakamaService {
 
   async callRpc<T = unknown>(rpcId: string, payload: object): Promise<T> {
     const url = `${this.httpUrl}/v2/rpc/${rpcId}?http_key=${encodeURIComponent(this.serverKey)}`;
-    const body = JSON.stringify(payload);
+    const body = JSON.stringify(JSON.stringify(payload));
 
     const response = await fetch(url, {
       method: "POST",
