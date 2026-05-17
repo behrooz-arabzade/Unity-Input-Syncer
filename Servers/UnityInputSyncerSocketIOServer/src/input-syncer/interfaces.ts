@@ -16,6 +16,8 @@ export interface InputSyncerServerOptions {
   sessionFinishBroadcast?: boolean;
   rejectInputAfterSessionFinish?: boolean;
   abandonMatchTimeoutSeconds?: number;
+  /** Per-user disconnect grace period in seconds before marking as abandoned. */
+  disconnectAbandonTimeoutSeconds?: number;
   matchInstanceId?: string;
   /** Nakama match manager match_id for result reporting back to Nakama. */
   nakamaMatchId?: string;

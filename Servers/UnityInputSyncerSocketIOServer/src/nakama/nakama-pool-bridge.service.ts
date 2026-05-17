@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleInit } from "@nestjs/common";
 import { InputSyncerPoolService } from "../input-syncer/pool.service";
 import { NakamaMatchResultService } from "./nakama-match-result.service";
+import { NakamaMatchAbandonService } from "./nakama-match-abandon.service";
 
 @Injectable()
 export class NakamaPoolBridge implements OnModuleInit {
@@ -9,6 +10,7 @@ export class NakamaPoolBridge implements OnModuleInit {
   constructor(
     private readonly pool: InputSyncerPoolService,
     private readonly matchResult: NakamaMatchResultService,
+    private readonly matchAbandon: NakamaMatchAbandonService,
   ) {}
 
   onModuleInit(): void {
@@ -26,6 +28,13 @@ export class NakamaPoolBridge implements OnModuleInit {
         }
       }).catch((err) => {
         this.logger.error(`Failed in afterPlayerSessionFinished for ${userId}: ${err}`);
+      });
+    });
+
+    this.pool.registerAfterPlayerAbandonedHandler((instance, userId) => {
+      const nakamaMatchId = instance.server.options.nakamaMatchId;
+      this.matchAbandon.reportAbandon(nakamaMatchId, userId).catch((err) => {
+        this.logger.error(`Failed to report abandon for ${userId}: ${err}`);
       });
     });
   }

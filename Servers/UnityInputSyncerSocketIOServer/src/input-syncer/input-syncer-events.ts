@@ -14,5 +14,6 @@ export const InputSyncerEvents = {
   MATCH_USER_INPUT_EVENT: 'input',
   MATCH_USER_FINISH_EVENT: 'user-finish',
   MATCH_PLAYER_SESSION_FINISH_EVENT: 'player-session-finish',
+  MATCH_USER_ABANDON_EVENT: 'abandon',
   INPUT_SYNCER_PLAYER_SESSION_FINISH_EVENT: 'on-player-session-finish',
 } as const;

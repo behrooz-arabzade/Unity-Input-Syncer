@@ -34,6 +34,7 @@ type ResolvedServerOptions = {
   sessionFinishBroadcast: boolean;
   rejectInputAfterSessionFinish: boolean;
   abandonMatchTimeoutSeconds: number;
+  disconnectAbandonTimeoutSeconds: number;
   matchInstanceId: string;
   nakamaMatchId?: string;
   matchAccess: MatchAccessMode;
@@ -77,6 +78,7 @@ function resolveOptions(o?: InputSyncerServerOptions): ResolvedServerOptions {
     sessionFinishBroadcast: o?.sessionFinishBroadcast ?? true,
     rejectInputAfterSessionFinish: o?.rejectInputAfterSessionFinish ?? false,
     abandonMatchTimeoutSeconds: o?.abandonMatchTimeoutSeconds ?? 0,
+    disconnectAbandonTimeoutSeconds: o?.disconnectAbandonTimeoutSeconds ?? 60,
     matchInstanceId: o?.matchInstanceId ?? '',
     nakamaMatchId: o?.nakamaMatchId,
     matchAccess,
@@ -106,6 +108,7 @@ export class InputSyncerServer {
   private stepInterval: ReturnType<typeof setInterval> | null = null;
   private disposed = false;
   private abandonDeadlineMs: number | null = null;
+  private readonly disconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
   lastFinishReason: string = InputSyncerFinishReasons.Completed;
 
   sendToSocket: SendToSocketFn = () => {};
@@ -115,6 +118,7 @@ export class InputSyncerServer {
   onPlayerJoined: (player: InputSyncerPlayer) => void = () => {};
   onPlayerFinished: (player: InputSyncerPlayer) => void = () => {};
   onPlayerSessionFinished: (player: InputSyncerPlayer, data: Record<string, unknown>) => void = () => {};
+  onPlayerAbandoned: (player: InputSyncerPlayer) => void = () => {};
   onMatchStarted: () => void = () => {};
   onMatchFinished: () => void = () => {};
   onMatchFinishedWithReason: (reason: string) => void = () => {};
@@ -178,6 +182,10 @@ export class InputSyncerServer {
     this.disposed = true;
 
     this.clearStepInterval();
+    for (const timer of this.disconnectTimers.values()) {
+      clearTimeout(timer);
+    }
+    this.disconnectTimers.clear();
     this.state.players.clear();
     this.state.stepHistory.clear();
     this.state.pendingInputs = [];
@@ -372,6 +380,98 @@ export class InputSyncerServer {
     this.sendAllStepsToPlayer(socketId);
   }
 
+  handlePlayerDisconnect(socketId: string): void {
+    const player = this.state.players.get(socketId);
+    if (!player) {
+      return;
+    }
+
+    if (!player.joined || !this.state.matchStarted || this.state.matchFinished) {
+      this.removePlayer(socketId);
+      return;
+    }
+
+    if (this.options.disconnectAbandonTimeoutSeconds <= 0) {
+      this.removePlayer(socketId);
+      return;
+    }
+
+    player.disconnected = true;
+
+    this.state.pendingInputs.push({
+      type: 'disconnect',
+      userId: player.userId,
+      timestamp: Date.now(),
+      reason: 'socket_closed',
+    });
+
+    const timeoutMs = this.options.disconnectAbandonTimeoutSeconds * 1000;
+    const timer = setTimeout(() => {
+      this.handleDisconnectTimeout(player);
+    }, timeoutMs);
+
+    this.disconnectTimers.set(player.userId, timer);
+  }
+
+  handlePlayerReconnect(oldSocketId: string, newSocketId: string, userId: string): void {
+    const player = this.state.players.get(oldSocketId);
+    if (!player || !player.disconnected || player.abandoned) return;
+
+    const timer = this.disconnectTimers.get(userId);
+    if (timer) {
+      clearTimeout(timer);
+      this.disconnectTimers.delete(userId);
+    }
+
+    player.disconnected = false;
+    player.socketId = newSocketId;
+    this.state.players.delete(oldSocketId);
+    this.state.players.set(newSocketId, player);
+
+    this.state.pendingInputs.push({
+      type: 'reconnect',
+      userId: player.userId,
+      timestamp: Date.now(),
+      reason: 'client_returned',
+    });
+
+    if (this.options.sendStepHistoryOnLateJoin) {
+      this.sendAllStepsToPlayer(newSocketId);
+    }
+  }
+
+  handleManualAbandon(socketId: string): void {
+    const player = this.state.players.get(socketId);
+    if (!player || !player.joined || player.abandoned) return;
+    if (!this.state.matchStarted || this.state.matchFinished) return;
+
+    const timer = this.disconnectTimers.get(player.userId);
+    if (timer) {
+      clearTimeout(timer);
+      this.disconnectTimers.delete(player.userId);
+    }
+
+    player.abandoned = true;
+
+    this.state.pendingInputs.push({
+      type: 'abandon',
+      userId: player.userId,
+      timestamp: Date.now(),
+      reason: 'manual',
+    });
+
+    this.onPlayerAbandoned(player);
+  }
+
+  findDisconnectedPlayerByUserId(userId: string): InputSyncerPlayer | undefined {
+    for (const player of this.state.players.values()) {
+      if (player.userId === userId && player.disconnected && !player.abandoned) {
+        return player;
+      }
+    }
+    return undefined;
+  }
+
   getPlayerCount(): number {
     return this.state.players.size;
   }
@@ -428,6 +528,23 @@ export class InputSyncerServer {
     }
 
     this.updateAbandonDeadline();
+  }
+
+  private handleDisconnectTimeout(player: InputSyncerPlayer): void {
+    this.disconnectTimers.delete(player.userId);
+
+    if (player.abandoned || this.state.matchFinished) return;
+
+    player.abandoned = true;
+
+    this.state.pendingInputs.push({
+      type: 'abandon',
+      userId: player.userId,
+      timestamp: Date.now(),
+      reason: 'disconnect_timeout',
+    });
+
+    this.onPlayerAbandoned(player);
   }
 
   private updateAbandonDeadline(): void {
@@ -555,7 +672,7 @@ export class InputSyncerServer {
 
   private broadcastToJoined(event: string, data: unknown): void {
     for (const player of this.state.players.values()) {
-      if (player.joined) {
+      if (player.joined && !player.disconnected) {
         this.sendToSocket(player.socketId, event, data);
       }
     }

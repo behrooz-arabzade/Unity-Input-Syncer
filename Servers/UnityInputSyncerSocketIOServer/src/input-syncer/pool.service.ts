@@ -27,6 +27,7 @@ function mergeServerOptions(
     'sessionFinishBroadcast',
     'rejectInputAfterSessionFinish',
     'abandonMatchTimeoutSeconds',
+    'disconnectAbandonTimeoutSeconds',
     'matchInstanceId',
     'nakamaMatchId',
     'matchAccess',
@@ -67,6 +68,11 @@ export class InputSyncerPoolService implements OnModuleDestroy {
     | ((instance: ServerInstance, userId: string, data: Record<string, unknown>) => void)
     | undefined;
 
+  /** Called when a player is marked as abandoned (disconnect timeout or manual). */
+  private afterPlayerAbandoned:
+    | ((instance: ServerInstance, userId: string) => void)
+    | undefined;
+
   registerBeforeInstanceDestroyedHandler(
     handler: (instanceId: string) => void,
   ): void {
@@ -83,6 +89,12 @@ export class InputSyncerPoolService implements OnModuleDestroy {
     handler: (instance: ServerInstance, userId: string, data: Record<string, unknown>) => void,
   ): void {
     this.afterPlayerSessionFinished = handler;
+  }
+
+  registerAfterPlayerAbandonedHandler(
+    handler: (instance: ServerInstance, userId: string) => void,
+  ): void {
+    this.afterPlayerAbandoned = handler;
   }
 
   private readonly maxInstances: number;
@@ -139,6 +151,10 @@ export class InputSyncerPoolService implements OnModuleDestroy {
 
     server.onPlayerSessionFinished = (player, data) => {
       this.afterPlayerSessionFinished?.(instance, player.userId, data);
+    };
+
+    server.onPlayerAbandoned = (player) => {
+      this.afterPlayerAbandoned?.(instance, player.userId);
     };
 
     instance.onStateChanged = (inst, _oldState, newState) => {

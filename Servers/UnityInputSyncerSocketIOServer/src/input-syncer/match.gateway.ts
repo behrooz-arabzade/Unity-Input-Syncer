@@ -204,6 +204,17 @@ export class MatchGateway
       }
     };
 
+    // Check if this is a reconnect for a disconnected player
+    const queryUserId = firstQueryString(socket.handshake.query.userId);
+    if (queryUserId) {
+      const disconnectedPlayer = instance.server.findDisconnectedPlayerByUserId(queryUserId);
+      if (disconnectedPlayer) {
+        instance.server.handlePlayerReconnect(disconnectedPlayer.socketId, socket.id, queryUserId);
+        this.logger.log(`Socket ${socket.id} reconnected as ${queryUserId} to match ${matchId}`);
+        return;
+      }
+    }
+
     instance.server.addPlayer(socket.id);
     // Connected sockets must be "joined" for auto-start and step delivery; many
     // clients only call Connect (query carries matchId / optional userId) and
@@ -219,7 +230,7 @@ export class MatchGateway
 
     const instance = this.pool.getInstance(instanceId);
     if (instance) {
-      instance.server.removePlayer(socket.id);
+      instance.server.handlePlayerDisconnect(socket.id);
     }
 
     this.socketToInstance.delete(socket.id);
@@ -301,6 +312,18 @@ export class MatchGateway
       server.handleRequestAllSteps(socket.id);
     } catch (e) {
       logGatewayError(this.logger, 'handleRequestAllSteps', socket.id, e);
+      throw e;
+    }
+  }
+
+  @SubscribeMessage(InputSyncerEvents.MATCH_USER_ABANDON_EVENT)
+  handleAbandon(@ConnectedSocket() socket: Socket): void {
+    try {
+      const server = this.getServerForSocket(socket.id);
+      if (!server) return;
+      server.handleManualAbandon(socket.id);
+    } catch (e) {
+      logGatewayError(this.logger, 'handleAbandon', socket.id, e);
       throw e;
     }
   }
