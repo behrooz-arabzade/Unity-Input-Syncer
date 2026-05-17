@@ -28,6 +28,7 @@ function mergeServerOptions(
     'rejectInputAfterSessionFinish',
     'abandonMatchTimeoutSeconds',
     'matchInstanceId',
+    'nakamaMatchId',
     'matchAccess',
     'matchPassword',
     'allowedMatchTokens',
@@ -56,10 +57,32 @@ export class InputSyncerPoolService implements OnModuleDestroy {
   /** Called before removing an instance so transports (e.g. Socket.IO) can close client connections. */
   private beforeInstanceDestroyed: ((instanceId: string) => void) | undefined;
 
+  /** Called when a match finishes, before the instance is destroyed. */
+  private afterMatchFinished:
+    | ((instance: ServerInstance, finishReason: string) => void)
+    | undefined;
+
+  /** Called when an individual player sends player-session-finish. */
+  private afterPlayerSessionFinished:
+    | ((instance: ServerInstance, userId: string, data: Record<string, unknown>) => void)
+    | undefined;
+
   registerBeforeInstanceDestroyedHandler(
     handler: (instanceId: string) => void,
   ): void {
     this.beforeInstanceDestroyed = handler;
+  }
+
+  registerAfterMatchFinishedHandler(
+    handler: (instance: ServerInstance, finishReason: string) => void,
+  ): void {
+    this.afterMatchFinished = handler;
+  }
+
+  registerAfterPlayerSessionFinishedHandler(
+    handler: (instance: ServerInstance, userId: string, data: Record<string, unknown>) => void,
+  ): void {
+    this.afterPlayerSessionFinished = handler;
   }
 
   private readonly maxInstances: number;
@@ -114,8 +137,16 @@ export class InputSyncerPoolService implements OnModuleDestroy {
     const server = new InputSyncerServer(serverOptions);
     const instance = new ServerInstance(id, server);
 
+    server.onPlayerSessionFinished = (player, data) => {
+      this.afterPlayerSessionFinished?.(instance, player.userId, data);
+    };
+
     instance.onStateChanged = (inst, _oldState, newState) => {
       this.logger.log(`Instance ${inst.id} state changed to ${newState}`);
+
+      if (newState === ServerInstanceState.Finished) {
+        this.afterMatchFinished?.(inst, inst.server.lastFinishReason);
+      }
 
       if (
         newState === ServerInstanceState.Finished &&

@@ -35,6 +35,7 @@ type ResolvedServerOptions = {
   rejectInputAfterSessionFinish: boolean;
   abandonMatchTimeoutSeconds: number;
   matchInstanceId: string;
+  nakamaMatchId?: string;
   matchAccess: MatchAccessMode;
   matchPassword: string;
   allowedMatchTokens: Set<string>;
@@ -77,6 +78,7 @@ function resolveOptions(o?: InputSyncerServerOptions): ResolvedServerOptions {
     rejectInputAfterSessionFinish: o?.rejectInputAfterSessionFinish ?? false,
     abandonMatchTimeoutSeconds: o?.abandonMatchTimeoutSeconds ?? 0,
     matchInstanceId: o?.matchInstanceId ?? '',
+    nakamaMatchId: o?.nakamaMatchId,
     matchAccess,
     matchPassword,
     allowedMatchTokens,
@@ -112,7 +114,7 @@ export class InputSyncerServer {
   onPlayerDisconnected: (player: InputSyncerPlayer) => void = () => {};
   onPlayerJoined: (player: InputSyncerPlayer) => void = () => {};
   onPlayerFinished: (player: InputSyncerPlayer) => void = () => {};
-  onPlayerSessionFinished: (player: InputSyncerPlayer) => void = () => {};
+  onPlayerSessionFinished: (player: InputSyncerPlayer, data: Record<string, unknown>) => void = () => {};
   onMatchStarted: () => void = () => {};
   onMatchFinished: () => void = () => {};
   onMatchFinishedWithReason: (reason: string) => void = () => {};
@@ -344,7 +346,7 @@ export class InputSyncerServer {
       );
     }
 
-    this.onPlayerSessionFinished(player);
+    this.onPlayerSessionFinished(player, payloadData ?? {});
 
     if (
       this.options.rewardOutcomeDelivery ===

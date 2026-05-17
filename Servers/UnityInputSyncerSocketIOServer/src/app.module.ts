@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { InputSyncerModule } from './input-syncer';
 import { RewardOutcomeDeliveryMode } from './input-syncer/reward-delivery';
+import { NakamaModule } from './nakama/nakama.module';
 
 function envBool(name: string, fallback: boolean): boolean {
   const raw = process.env[name];
@@ -70,6 +71,7 @@ function envRewardMode(): RewardOutcomeDeliveryMode {
         authToken: process.env.INPUT_SYNCER_ADMIN_AUTH_TOKEN ?? '',
       },
     }),
+    NakamaModule,
   ],
 })
 export class AppModule {}

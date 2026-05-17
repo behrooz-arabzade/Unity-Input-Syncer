@@ -49,6 +49,7 @@ function overridesFromCreateBody(
   if (body.allowedMatchTokens !== undefined)
     o.allowedMatchTokens = body.allowedMatchTokens;
   if (body.matchData !== undefined) o.matchData = body.matchData;
+  if (body.nakamaMatchId !== undefined) o.nakamaMatchId = body.nakamaMatchId;
   if (body.users !== undefined) {
     o.users =
       body.users != null &&

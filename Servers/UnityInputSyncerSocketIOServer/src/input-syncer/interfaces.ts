@@ -17,6 +17,8 @@ export interface InputSyncerServerOptions {
   rejectInputAfterSessionFinish?: boolean;
   abandonMatchTimeoutSeconds?: number;
   matchInstanceId?: string;
+  /** Nakama match manager match_id for result reporting back to Nakama. */
+  nakamaMatchId?: string;
   /** Default `open`. */
   matchAccess?: 'open' | 'password' | 'token';
   matchPassword?: string;

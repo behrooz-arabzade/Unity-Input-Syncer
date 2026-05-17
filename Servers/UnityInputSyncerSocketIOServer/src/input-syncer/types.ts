@@ -53,6 +53,7 @@ export interface AdminCreateInstanceRequest {
   allowedMatchTokens?: string[];
   matchData?: unknown;
   users?: Record<string, unknown>;
+  nakamaMatchId?: string;
 }
 
 export interface AdminResourceUsage {
