@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Unity Input Syncer is a Unity 6 (6000.3.0f1) library for deterministic multiplayer input synchronization. It provides a client-side SDK that collects player inputs, sends them to a server in lockstep "steps," and replays received inputs in order. This enables lockstep deterministic simulation for multiplayer games.
+UnityInputSyncer is a Unity 6 (6000.3.0f1) library for deterministic multiplayer input synchronization. It provides a client-side SDK that collects player inputs, sends them to a server in lockstep "steps," and replays received inputs in order. This enables lockstep deterministic simulation for multiplayer games.
 
 ## Requirements
 
@@ -129,18 +129,18 @@ Bool values accept `true`/`false` or `1`/`0`. The `Server` property on `Dedicate
 
 The TypeScript server under `Servers/UnityInputSyncerSocketIOServer/` (repository root) can run in two modes:
 
-| Mode | Entry | Behavior |
-|------|--------|----------|
-| Single process | `node dist/main.js` / `npm run start:prod` | One Node process; all match instances share one CPU-bound event loop. |
+| Mode                     | Entry                                                    | Behavior                                                                                                                                                                                                                                                                                                                                |
+| ------------------------ | -------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Single process           | `node dist/main.js` / `npm run start:prod`               | One Node process; all match instances share one CPU-bound event loop.                                                                                                                                                                                                                                                                   |
 | Multi-core (one machine) | `node dist/cluster-primary.js` / `npm run start:cluster` | A **primary** listens on `INPUT_SYNCER_PORT` and spawns **workers**; each worker is a full Nest app with its own in-memory pool on `127.0.0.1` at `INPUT_SYNCER_INTERNAL_PORT_BASE`, `BASE+1`, … New instances are assigned to the least-loaded worker; WebSocket and admin traffic for a given `instanceId` are routed to that worker. |
 
 **Cluster environment variables:**
 
-| Variable | Description |
-|----------|-------------|
-| `INPUT_SYNCER_WORKER_COUNT` | Number of workers (default `max(1, logical CPU count − 1)`). |
-| `INPUT_SYNCER_INTERNAL_PORT_BASE` | First worker HTTP port (default `INPUT_SYNCER_PORT + 1`). Must be greater than the public port. |
-| `INPUT_SYNCER_BIND` | Used by workers when forked (set to `127.0.0.1` by the primary). For `main.js` alone, optional bind address. |
+| Variable                          | Description                                                                                                  |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `INPUT_SYNCER_WORKER_COUNT`       | Number of workers (default `max(1, logical CPU count − 1)`).                                                 |
+| `INPUT_SYNCER_INTERNAL_PORT_BASE` | First worker HTTP port (default `INPUT_SYNCER_PORT + 1`). Must be greater than the public port.              |
+| `INPUT_SYNCER_BIND`               | Used by workers when forked (set to `127.0.0.1` by the primary). For `main.js` alone, optional bind address. |
 
 Workers receive a generated `INPUT_SYNCER_INTERNAL_SECRET` for `GET /api/internal/pool-meta` and `GET /api/internal/instance/:id/exists` (not exposed through the primary’s public port). If a **worker process crashes**, its matches are lost; the primary clears routing for that worker and restarts it after a short delay. The Unity **Socket.IO Server** window can enable “Multi-core cluster” to launch `dist/cluster-primary.js` instead of `dist/main.js`.
 
