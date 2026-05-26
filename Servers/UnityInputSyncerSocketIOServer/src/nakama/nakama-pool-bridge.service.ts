@@ -2,6 +2,7 @@ import { Injectable, Logger, OnModuleInit } from "@nestjs/common";
 import { InputSyncerPoolService } from "../input-syncer/pool.service";
 import { NakamaMatchResultService } from "./nakama-match-result.service";
 import { NakamaMatchAbandonService } from "./nakama-match-abandon.service";
+import { NakamaMatchInputLogService } from "./nakama-match-input-log.service";
 
 @Injectable()
 export class NakamaPoolBridge implements OnModuleInit {
@@ -11,6 +12,7 @@ export class NakamaPoolBridge implements OnModuleInit {
     private readonly pool: InputSyncerPoolService,
     private readonly matchResult: NakamaMatchResultService,
     private readonly matchAbandon: NakamaMatchAbandonService,
+    private readonly matchInputLog: NakamaMatchInputLogService,
   ) {}
 
   onModuleInit(): void {
@@ -36,6 +38,18 @@ export class NakamaPoolBridge implements OnModuleInit {
       this.matchAbandon.reportAbandon(nakamaMatchId, userId).catch((err) => {
         this.logger.error(`Failed to report abandon for ${userId}: ${err}`);
       });
+    });
+
+    this.pool.registerAfterMatchFinishedHandler((instance, finishReason) => {
+      const nakamaMatchId = instance.server.options.nakamaMatchId;
+      const logSteps = instance.server.getStepHistorySnapshot();
+      this.matchInputLog
+        .uploadInputLog(nakamaMatchId, logSteps, finishReason)
+        .catch((err) => {
+          this.logger.error(
+            `Failed to upload input log for match ${nakamaMatchId}: ${err}`,
+          );
+        });
     });
   }
 }

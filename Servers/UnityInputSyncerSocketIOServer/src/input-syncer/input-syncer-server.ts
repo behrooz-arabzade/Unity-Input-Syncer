@@ -488,6 +488,16 @@ export class InputSyncerServer {
     return [...this.state.players.values()].filter((p) => p.joined);
   }
 
+  /**
+   * Snapshot of the per-step input history, sorted by step ascending.
+   * Returned as a plain array (not the live Map) so callers can JSON-serialize
+   * it directly. Used by the Nakama bridge to upload the input log on match
+   * finish for replay reconstruction.
+   */
+  getStepHistorySnapshot(): StepInputs[] {
+    return [...this.state.stepHistory.values()].sort((a, b) => a.step - b.step);
+  }
+
   get isMatchStarted(): boolean {
     return this.state.matchStarted;
   }
