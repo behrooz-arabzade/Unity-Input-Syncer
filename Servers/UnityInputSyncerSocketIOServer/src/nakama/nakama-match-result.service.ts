@@ -7,12 +7,20 @@ interface MatchUserFinishPayload {
   data: Record<string, unknown>;
 }
 
+export interface NakamaGrantedReward {
+  kind: "card_pack" | "currency" | "xp";
+  id: string;
+  count: number;
+  metadata?: Record<string, unknown>;
+}
+
 export interface NakamaUserFinishResult {
   ok: boolean;
   match_id: string;
   match_status: "waiting" | "completed" | "cancelled";
   user_outcome: "win" | "loss" | "draw";
   mmr_update: { user_id: string; old_mmr: number; new_mmr: number; delta: number; outcome: string } | null;
+  rewards: NakamaGrantedReward[];
 }
 
 @Injectable()
