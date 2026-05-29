@@ -73,7 +73,15 @@ namespace SyncSimulation
                 if (_localHashAfterSimStep.TryGetValue(next, out var predictedLocalHash))
                 {
                     var auth = _state.GetInputsForStep(next);
-                    var authLocalHash = StepInputHash.ComputeForLocalUser(auth, _localUserId);
+                    // Hash the FULL authoritative input set (every user) so
+                    // an opponent input change at this step — which the
+                    // local prediction couldn't anticipate (it carried the
+                    // last authoritative opponent input forward) — flips
+                    // the hash and triggers rollback. Hashing only the
+                    // local user here was the silent-divergence bug:
+                    // if my local input matched, no rollback fired even
+                    // when the opponent submitted something new.
+                    var authLocalHash = StepInputHash.ComputeForAllUsers(auth);
                     if (authLocalHash != predictedLocalHash)
                     {
                         _authoritativeMaxStep = next;
@@ -161,7 +169,13 @@ namespace SyncSimulation
         public bool StepUsesPrediction(int step) => step > _authoritativeMaxStep;
 
         public ulong ComputeLocalHashForBuiltInputs(List<object> output) =>
-            StepInputHash.ComputeForLocalUser(output, _localUserId);
+            // Match the all-users hash used during authoritative comparison.
+            // The local prediction's `output` already contains the local
+            // user's predicted inputs PLUS the carried-forward opponent
+            // inputs from `BuildMergedInputs`, so hashing the full set
+            // captures what we predicted for both sides — the value
+            // that authoritative will match against.
+            StepInputHash.ComputeForAllUsers(output);
 
         static void SortByIndex(List<object> list)
         {
