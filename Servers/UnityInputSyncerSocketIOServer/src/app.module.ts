@@ -61,6 +61,18 @@ function envRewardMode(): RewardOutcomeDeliveryMode {
           'INPUT_SYNCER_QUORUM_USER_FINISH_ENDS_MATCH',
           true,
         ),
+        sessionFinishMaxPayloadBytes: envInt(
+          'INPUT_SYNCER_SESSION_FINISH_MAX_PAYLOAD_BYTES',
+          4096,
+        ),
+        sessionFinishBroadcast: envBool(
+          'INPUT_SYNCER_SESSION_FINISH_BROADCAST',
+          true,
+        ),
+        rejectInputAfterSessionFinish: envBool(
+          'INPUT_SYNCER_REJECT_INPUT_AFTER_SESSION_FINISH',
+          false,
+        ),
         abandonMatchTimeoutSeconds: envFloat(
           'INPUT_SYNCER_ABANDON_MATCH_TIMEOUT',
           0,

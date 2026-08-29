@@ -1,5 +1,6 @@
 import 'reflect-metadata';
 import * as fs from 'fs';
+import { INestApplication } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { IoAdapter } from '@nestjs/platform-socket.io';
 import { AppModule } from './app.module';
@@ -72,11 +73,39 @@ function installFatalProcessLogging(): void {
 
 installFatalProcessLogging();
 
+/**
+ * Without this the process ignores SIGTERM outright: Nest registers no signal listeners
+ * unless shutdown hooks are enabled, and as PID 1 in a container the kernel applies no
+ * default disposition either — so `docker stop` waits out its whole grace period and then
+ * SIGKILLs. That pause looks like a graceful drain and is not one.
+ *
+ * There is nothing to drain: a match lives in this process's memory and cannot be moved.
+ * What closing properly does buy is that `InputSyncerPoolService.onModuleDestroy` actually
+ * runs — the pool tick is cleared and instances are torn down — and that an operator's stop
+ * is prompt and honest. Draining is done *upstream*, by not allocating here any more.
+ */
+function installSignalHandlers(app: INestApplication): void {
+  let closing = false;
+  const close = (signal: NodeJS.Signals): void => {
+    if (closing) return;
+    closing = true;
+    console.log(`${LOG} ${signal} received — closing`);
+    void app
+      .close()
+      .catch((e: unknown) => console.error(`${LOG} close failed`, e))
+      .finally(() => process.exit(0));
+  };
+  process.on('SIGTERM', () => close('SIGTERM'));
+  process.on('SIGINT', () => close('SIGINT'));
+}
+
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
   app.useWebSocketAdapter(new IoAdapter(app));
   app.enableCors();
+  app.enableShutdownHooks();
+  installSignalHandlers(app);
 
   const port = parseInt(process.env.INPUT_SYNCER_PORT ?? '3000', 10);
   const bind = process.env.INPUT_SYNCER_BIND;

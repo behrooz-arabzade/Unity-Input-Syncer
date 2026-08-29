@@ -651,9 +651,24 @@ All fields are optional; omitted fields keep pool/module defaults.
 | `sendStepHistoryOnLateJoin` | bool |
 | `matchAccess` | `"open"` \| `"password"` \| `"token"` |
 | `matchPassword` | Required when `matchAccess` is `password` |
-| `allowedMatchTokens` | Non-empty string array when `matchAccess` is `token` (max 64 tokens, 256 chars each) |
+| `allowedMatchTokens` | When `matchAccess` is `token`: `{ "<userId>": "<token>" }` (bound, preferred) or `["<token>", …]` (unbound). Max 64 distinct tokens, 256 chars each |
 | `matchData` | Arbitrary JSON object stored on the instance; sent to clients in `on-match-context` |
-| `users` | Map of `userId` → arbitrary JSON; merged into `on-match-context.users` |
+| `users` | Map of `userId` → arbitrary JSON; merged into `on-match-context.users`. Also the **roster** — see [Match access](#match-access-open--password--token) |
+| `disconnectAbandonTimeoutSeconds` | ≥ 0. Grace period before a dropped player is marked abandoned |
+| `quorumUserFinishEndsMatch` | bool |
+| `sessionFinishMaxPayloadBytes` | ≥ 1 |
+| `sessionFinishBroadcast` | bool |
+| `rejectInputAfterSessionFinish` | bool |
+| `abandonMatchTimeoutSeconds` | ≥ 0 |
+| `rewardOutcomeDelivery` | `0` \| `1` \| `2` |
+| `nakamaMatchId` | Nakama's match id, echoed on server-side callbacks |
+
+**An unrecognised field is a `400` naming it**, not a silent drop. That matters more than it
+sounds: a body key that is accepted and ignored is a configuration change that appears to have
+landed and did not, and the symptom surfaces much later as behaviour nobody can explain.
+`participant_user_ids` and `matchmaker` are accepted and deliberately unused — allocators send
+context alongside the options, and refusing that would break allocation outright. A genuinely
+new allocator field must be added to `ADMIN_CREATE_INSTANCE_KEYS` in the same change.
 
 **Size limits (validation):** `matchData` ≤ 65536 UTF-8 bytes; each `users` entry ≤ 16384 bytes; at most 64 user keys. If `INPUT_SYNCER_ADMIN_REQUIRE_MATCH_USER_DATA` is enabled, `matchData` and/or `users` must be non-empty.
 
@@ -704,9 +719,38 @@ When creating an instance, `matchAccess` selects how clients prove they may join
 |------|------------|------------------|------------|
 | `open` | Default | Only `matchId` (+ `userId`) in query | Handshake JSON from `Payload` |
 | `password` | `matchPassword` | Query `matchPassword` | Handshake JSON field `matchPassword` |
-| `token` | `allowedMatchTokens: ["..."]` | Query `matchToken` | Handshake JSON field `matchToken` |
+| `token` | `allowedMatchTokens` — see the two forms below | Query `matchToken` | Handshake JSON field `matchToken` |
 
-The server compares secrets using a constant-time hash where applicable (see `match-access.ts` / `MatchAccessHandshake.cs`).
+The server compares secrets using a constant-time hash (see `match-access.ts` /
+`MatchAccessHandshake.cs`).
+
+### Two forms of `allowedMatchTokens`
+
+**Bound — `{ "<userId>": "<token>" }`. Use this one.** A token then admits exactly the user
+it was minted for: the presented `matchToken` is compared against the token registered for
+the presented `userId`.
+
+```json
+"allowedMatchTokens": { "user-a": "…43 chars…", "user-b": "…43 chars…" }
+```
+
+**Unbound — `["<token>", …]`.** The original form, kept so upgrading is not a flag day. Any
+holder of any listed token may claim **any** `userId`, because the joining `userId` comes from
+the client's own handshake and there is nothing to check it against. A token in this form is a
+*match* secret, not a *player* secret — one of two invited players can seat both sides, which
+matters a great deal to any game that trusts a result only when both clients agree on it.
+
+Prefer the bound form whenever the allocator knows who is playing.
+
+### The roster check
+
+Independent of `matchAccess`: when the create body declared **`users`** (non-empty), a socket
+whose `userId` is not a key of it is refused. This is what covers the cases the token cannot —
+an `open` match, and the unbound token form — and it applies to the reconnect path too, which
+is keyed by the same claimed `userId`.
+
+Every refusal above reports `content-error` with reason **`match-access-denied`** and no detail
+about which check failed.
 
 ---
 
@@ -730,7 +774,15 @@ Common `reason` strings on `OnMatchFinishedWithReason`:
 - **`SendPlayerSessionFinish(object data)`** — Emits `player-session-finish` with optional payload; triggers `on-player-session-finish` (broadcast controlled by `SessionFinishBroadcast`). Payload size is capped by `SessionFinishMaxPayloadBytes`.
 - **`OnPlayerSessionFinish`** — `(userId, data)` per event.
 
-Configure related behavior via env vars / `InputSyncerServerOptions`: `QuorumUserFinishEndsMatch`, `AbandonMatchTimeoutSeconds`, `SessionFinishMaxPayloadBytes`, `SessionFinishBroadcast`, `RejectInputAfterSessionFinish`.
+Configure related behavior via env vars / `InputSyncerServerOptions`, **or per instance in the
+create body**: `quorumUserFinishEndsMatch`, `abandonMatchTimeoutSeconds`,
+`sessionFinishMaxPayloadBytes`, `sessionFinishBroadcast`, `rejectInputAfterSessionFinish`.
+
+> **`abandonMatchTimeoutSeconds` only fires when `disconnectAbandonTimeoutSeconds` is 0.** A
+> dropped player is marked `abandoned` but is never *removed*, and the joined-player count does
+> not exclude an abandoned player — so with any non-zero disconnect window the abandon deadline
+> is never armed and a half-empty match runs until `INPUT_SYNCER_MAX_INSTANCE_LIFETIME`. This is
+> a known defect, not a design.
 
 ---
 

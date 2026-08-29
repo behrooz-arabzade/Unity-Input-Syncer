@@ -21,15 +21,32 @@ import {
   InputSyncerServerOptions,
 } from './interfaces';
 import {
+  ADMIN_CREATE_INSTANCE_KEYS,
   AdminCreateInstanceRequest,
   AdminInstanceInfo,
   AdminPoolStats,
   ServerInstanceState,
 } from './types';
+import { RewardOutcomeDeliveryMode } from './reward-delivery';
 import { validateAdminMatchAccess } from './match-access';
 import { validateAdminMatchContext } from './match-context-admin';
 
 /** Only pass fields present on the body so `{}` does not wipe module defaults. */
+/**
+ * A body key that is not applied is a configuration change that looks like it landed and did
+ * not — `abandonMatchTimeoutSeconds` was silently dropped for exactly this reason. Name it
+ * and refuse the request instead.
+ */
+function unknownBodyKeys(body?: AdminCreateInstanceRequest): string[] {
+  if (!body || typeof body !== 'object') return [];
+  const unknown = Object.keys(body).filter(
+    (k) => !ADMIN_CREATE_INSTANCE_KEYS.includes(k),
+  );
+  return unknown.length === 0
+    ? []
+    : [`unknown field(s): ${unknown.join(', ')}`];
+}
+
 function overridesFromCreateBody(
   body?: AdminCreateInstanceRequest,
 ): InputSyncerServerOptions | undefined {
@@ -45,6 +62,19 @@ function overridesFromCreateBody(
     o.sendStepHistoryOnLateJoin = body.sendStepHistoryOnLateJoin;
   if (body.disconnectAbandonTimeoutSeconds !== undefined)
     o.disconnectAbandonTimeoutSeconds = body.disconnectAbandonTimeoutSeconds;
+  if (body.quorumUserFinishEndsMatch !== undefined)
+    o.quorumUserFinishEndsMatch = body.quorumUserFinishEndsMatch;
+  if (body.sessionFinishMaxPayloadBytes !== undefined)
+    o.sessionFinishMaxPayloadBytes = body.sessionFinishMaxPayloadBytes;
+  if (body.sessionFinishBroadcast !== undefined)
+    o.sessionFinishBroadcast = body.sessionFinishBroadcast;
+  if (body.rejectInputAfterSessionFinish !== undefined)
+    o.rejectInputAfterSessionFinish = body.rejectInputAfterSessionFinish;
+  if (body.abandonMatchTimeoutSeconds !== undefined)
+    o.abandonMatchTimeoutSeconds = body.abandonMatchTimeoutSeconds;
+  if (body.rewardOutcomeDelivery !== undefined)
+    o.rewardOutcomeDelivery =
+      body.rewardOutcomeDelivery as unknown as RewardOutcomeDeliveryMode;
   if (body.matchAccess !== undefined)
     o.matchAccess = body.matchAccess as 'open' | 'password' | 'token';
   if (body.matchPassword !== undefined) o.matchPassword = body.matchPassword;
@@ -78,6 +108,7 @@ export class AdminController {
     @Body() body?: AdminCreateInstanceRequest,
   ): AdminInstanceInfo {
     const errors: string[] = [];
+    errors.push(...unknownBodyKeys(body));
     if (body?.maxPlayers !== undefined && body.maxPlayers < 1)
       errors.push('maxPlayers must be >= 1');
     if (
@@ -85,6 +116,26 @@ export class AdminController {
       body.stepIntervalSeconds <= 0
     )
       errors.push('stepIntervalSeconds must be > 0');
+    if (
+      body?.sessionFinishMaxPayloadBytes !== undefined &&
+      body.sessionFinishMaxPayloadBytes < 1
+    )
+      errors.push('sessionFinishMaxPayloadBytes must be >= 1');
+    if (
+      body?.abandonMatchTimeoutSeconds !== undefined &&
+      body.abandonMatchTimeoutSeconds < 0
+    )
+      errors.push('abandonMatchTimeoutSeconds must be >= 0');
+    if (
+      body?.disconnectAbandonTimeoutSeconds !== undefined &&
+      body.disconnectAbandonTimeoutSeconds < 0
+    )
+      errors.push('disconnectAbandonTimeoutSeconds must be >= 0');
+    if (
+      body?.rewardOutcomeDelivery !== undefined &&
+      ![0, 1, 2].includes(body.rewardOutcomeDelivery)
+    )
+      errors.push('rewardOutcomeDelivery must be 0, 1 or 2');
 
     errors.push(...validateAdminMatchAccess(body));
     errors.push(
@@ -196,7 +247,7 @@ function mapToInfo(
     currentStep: instance.server.currentStep,
     uptimeSeconds: (Date.now() - instance.createdAt.getTime()) / 1000,
     matchAccess: opts.matchAccess,
-    allowedMatchTokenCount: opts.allowedMatchTokens.size,
+    allowedMatchTokenCount: opts.matchTokens.all.size,
     serverUrl: base,
     clientConnection: {
       transport: 'socket.io',

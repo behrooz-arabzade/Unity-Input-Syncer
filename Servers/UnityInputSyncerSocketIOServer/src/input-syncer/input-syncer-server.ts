@@ -10,7 +10,11 @@ import {
   type RewardPerUserHookPayload,
 } from './reward-delivery';
 import { AllStepInputs, StepInputs } from './types';
-import type { MatchAccessMode } from './match-access';
+import {
+  resolveMatchTokens,
+  type MatchAccessMode,
+  type ResolvedMatchTokens,
+} from './match-access';
 
 export type SendToSocketFn = (
   socketId: string,
@@ -39,7 +43,8 @@ type ResolvedServerOptions = {
   nakamaMatchId?: string;
   matchAccess: MatchAccessMode;
   matchPassword: string;
-  allowedMatchTokens: Set<string>;
+  /** Both forms resolved: every token, plus the userId binding when there is one. */
+  matchTokens: ResolvedMatchTokens;
   rewardOutcomeDelivery: RewardOutcomeDeliveryMode;
   matchData: unknown;
   users: Record<string, unknown>;
@@ -59,12 +64,12 @@ function resolveMatchAccess(
 function resolveOptions(o?: InputSyncerServerOptions): ResolvedServerOptions {
   const matchAccess = resolveMatchAccess(o?.matchAccess);
   let matchPassword = '';
-  let allowedMatchTokens = new Set<string>();
+  let matchTokens: ResolvedMatchTokens = { all: new Set<string>(), byUser: null };
   if (matchAccess === 'password') {
     matchPassword = o?.matchPassword ?? '';
   }
   if (matchAccess === 'token') {
-    allowedMatchTokens = new Set(o?.allowedMatchTokens ?? []);
+    matchTokens = resolveMatchTokens(o?.allowedMatchTokens);
   }
 
   return {
@@ -83,7 +88,7 @@ function resolveOptions(o?: InputSyncerServerOptions): ResolvedServerOptions {
     nakamaMatchId: o?.nakamaMatchId,
     matchAccess,
     matchPassword,
-    allowedMatchTokens,
+    matchTokens,
     rewardOutcomeDelivery:
       o?.rewardOutcomeDelivery ?? RewardOutcomeDeliveryMode.ClientToAdmin,
     matchData: o?.matchData ?? null,

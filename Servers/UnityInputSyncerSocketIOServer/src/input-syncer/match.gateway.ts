@@ -12,7 +12,11 @@ import { Logger } from '@nestjs/common';
 import { Server, Socket } from 'socket.io';
 import { InputSyncerPoolService } from './pool.service';
 import { InputSyncerEvents } from './input-syncer-events';
-import { checkSocketMatchAccess, firstQueryString } from './match-access';
+import {
+  checkKnownUser,
+  checkSocketMatchAccess,
+  firstQueryString,
+} from './match-access';
 
 /**
  * SocketIOUnity serializes Emit args as JSON arrays. Unwrap nested `[[{...}]]` down to a plain object.
@@ -170,7 +174,7 @@ export class MatchGateway
     const access = checkSocketMatchAccess(
       instance.server.options.matchAccess,
       instance.server.options.matchPassword,
-      instance.server.options.allowedMatchTokens,
+      instance.server.options.matchTokens,
       socket.handshake.query,
     );
     if (!access.ok) {
@@ -180,6 +184,23 @@ export class MatchGateway
       socket.emit(InputSyncerEvents.INPUT_SYNCER_CONTENT_ERROR, {
         reason: access.reason,
         message: access.message,
+      });
+      socket.disconnect(true);
+      return;
+    }
+
+    // Independent of matchAccess: an `open` match checks nothing, and the unbound token
+    // form cannot tell one holder from another. This is what stops a socket claiming a
+    // userId that was never in this match — including on the reconnect path below, which
+    // is keyed by exactly that claimed userId.
+    const known = checkKnownUser(instance.server.options.users, socket.handshake.query);
+    if (!known.ok) {
+      this.logger.warn(
+        `Socket ${socket.id} claimed a userId outside the match roster for ${matchId}`,
+      );
+      socket.emit(InputSyncerEvents.INPUT_SYNCER_CONTENT_ERROR, {
+        reason: known.reason,
+        message: known.message,
       });
       socket.disconnect(true);
       return;

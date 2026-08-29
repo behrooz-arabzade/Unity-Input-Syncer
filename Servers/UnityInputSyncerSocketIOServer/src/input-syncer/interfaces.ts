@@ -1,4 +1,5 @@
 import { InjectionToken, ModuleMetadata, OptionalFactoryDependency } from '@nestjs/common';
+import type { AllowedMatchTokens } from './match-access';
 import {
   RewardMatchHookPayload,
   RewardOutcomeDeliveryMode,
@@ -24,7 +25,8 @@ export interface InputSyncerServerOptions {
   /** Default `open`. */
   matchAccess?: 'open' | 'password' | 'token';
   matchPassword?: string;
-  allowedMatchTokens?: string[];
+  /** `["tok", …]` (unbound) or `{ "<userId>": "tok" }` (bound to a user). */
+  allowedMatchTokens?: AllowedMatchTokens;
   /** Opaque JSON from admin create; sent to clients as on-match-context. */
   matchData?: unknown;
   /** Per-userId simulation payloads from admin create. */
