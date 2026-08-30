@@ -25,6 +25,23 @@ namespace UnityInputSyncerClient.Drivers
 
         public override async Task<bool> ConnectAsync()
         {
+            // A second ConnectAsync on the same driver replaces the socket. The old one has
+            // to go with it: it still holds this driver's OnDisconnected and OnError
+            // handlers, and an old socket reporting a disconnect after a successful
+            // reconnect looks to the consumer exactly like the new one failing.
+            if (Socket != null)
+            {
+                try
+                {
+                    Socket.Dispose();
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogWarning($"SocketIODriver: disposing the previous socket threw: {ex.Message}");
+                }
+                Socket = null;
+            }
+
             Socket = new SocketIOUnity(Options.Url, new SocketIOOptions
             {
                 ExtraHeaders = new Dictionary<string, string>
@@ -51,7 +68,20 @@ namespace UnityInputSyncerClient.Drivers
 
             Socket.JsonSerializer = new NewtonsoftJsonSerializer(Options.JsonSerializerSettings);
 
-            // Replay any event registrations that were buffered before Socket was created
+            // Every name already in eventCallbacks has a dispatch closure — registered on the
+            // socket this call just replaced. Re-bind them onto the new one first. Without
+            // this a second ConnectAsync produced a live socket that received no events at
+            // all: On() short-circuits registration once a name is in eventCallbacks, and
+            // pendingJsonCallbacks was drained by the first connect, so nothing re-registered
+            // and the failure was silent. Found on the real server by football-card E07/S09.
+            foreach (var eventName in eventCallbacks.Keys)
+            {
+                RegisterSocketDispatch(eventName);
+            }
+
+            // Then replay registrations buffered before a Socket existed at all. Order
+            // matters: a name already re-bound above is a no-op here, and a name that is new
+            // gets its dispatch from On() — neither path registers a name twice.
             foreach (var (eventName, callback) in pendingJsonCallbacks)
             {
                 On(eventName, callback);
@@ -104,6 +134,11 @@ namespace UnityInputSyncerClient.Drivers
 
         public override async Task DisconnectAsync()
         {
+            if (Socket == null)
+            {
+                return;
+            }
+
             await Socket.DisconnectAsync();
         }
 
@@ -160,21 +195,30 @@ namespace UnityInputSyncerClient.Drivers
             if (!eventCallbacks.ContainsKey(eventName))
             {
                 eventCallbacks.Add(eventName, new List<Action<ConnectionResponse>>());
-
-                Socket.OnUnityThread(eventName, (response) =>
-                {
-                    var connectionResponse = new ConnectionResponse
-                    {
-                        data = response
-                    };
-                    foreach (var callback in eventCallbacks[eventName])
-                    {
-                        callback(connectionResponse);
-                    }
-                });
+                RegisterSocketDispatch(eventName);
             }
 
             eventCallbacks[eventName].Add(callback);
+        }
+
+        /// <summary>
+        /// Binds one event name on the current socket to this driver's callback list. The
+        /// list is looked up on every dispatch, not captured, so re-binding after a
+        /// reconnect keeps the callbacks that were registered before it.
+        /// </summary>
+        private void RegisterSocketDispatch(string eventName)
+        {
+            Socket.OnUnityThread(eventName, (response) =>
+            {
+                var connectionResponse = new ConnectionResponse
+                {
+                    data = response
+                };
+                foreach (var callback in eventCallbacks[eventName])
+                {
+                    callback(connectionResponse);
+                }
+            });
         }
 
         public override void On(int eventId, Action<NativeArray<byte>> callback)

@@ -49,6 +49,11 @@ export interface InputSyncerPoolOptions {
 
 export interface InputSyncerAdminOptions {
   authToken?: string;
+  /**
+   * The operator's explicit "yes, an open admin API is what I want". Without a token and
+   * without this, `BearerAuthGuard` refuses every request and `main.ts` refuses to start.
+   */
+  authDisabled?: boolean;
 }
 
 export interface InputSyncerModuleOptions {

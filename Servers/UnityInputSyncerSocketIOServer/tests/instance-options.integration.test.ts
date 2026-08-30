@@ -5,6 +5,10 @@ import { IoAdapter } from '@nestjs/platform-socket.io';
 import { io, Socket } from 'socket.io-client';
 import { AppModule } from '../src/app.module';
 
+/** Set by tests/setup/adminAuth.js — the guard fails closed without it (E08/S10). */
+const ADMIN_AUTH = `Bearer ${process.env.INPUT_SYNCER_ADMIN_AUTH_TOKEN ?? ''}`;
+
+
 /**
  * `mergeServerOptions` accepts 21 per-instance keys; `overridesFromCreateBody` used to forward
  * 13, and the other eight were accepted with a 201 and dropped in silence. The silence was the
@@ -41,7 +45,10 @@ const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 async function post(body: Record<string, unknown>): Promise<Response> {
   return fetch(`${baseUrl}/api/instances`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: ADMIN_AUTH,
+    },
     body: JSON.stringify(body),
   });
 }
@@ -68,6 +75,14 @@ function connect(matchId: string, userId: string): Socket {
     query: { matchId, userId },
     forceNew: true,
     reconnection: false,
+  });
+}
+
+function connected(socket: Socket): Promise<void> {
+  return new Promise((resolve, reject) => {
+    socket.on('connect', () => resolve());
+    socket.on('connect_error', (err) => reject(err));
+    setTimeout(() => reject(new Error('connect timeout')), 5000);
   });
 }
 
@@ -241,13 +256,14 @@ describe('per-instance options — the six that used to be dropped', () => {
     expect(await reason).toBe('no-finish');
   });
 
-  it('CURRENT BEHAVIOUR: a non-zero disconnect window never arms the deadline', async () => {
-    // Not the behaviour anyone wants, and it is not this story's to change. A disconnected
-    // player is marked `abandoned` but never *removed*, and `getJoinedPlayerCount` counts
-    // `joined` regardless — so `updateAbandonDeadline` is never reached and the seat still
-    // reads as filled. Every realistic configuration has a non-zero window (ours is 90 s),
-    // so `abandon_timeout` cannot fire in production and such a match runs to
-    // `max_instance_lifetime` instead. Filed as E08/S09; this expectation flips when it lands.
+  it('and arms it through a non-zero disconnect window too', async () => {
+    // The case E08/S09 fixed, and the one every real deployment runs: the window is 90 s
+    // here and 0.2 s in the test, but the shape is the same. A disconnected player is
+    // marked `abandoned` and deliberately *not* removed — `findDisconnectedPlayerByUserId`
+    // needs the record for reconnect — so the seat used to go on reading as filled and the
+    // deadline was never armed. Such a match ran to `max_instance_lifetime`, half an hour
+    // later, which the client treats as Void: the abandoning player paid nothing and the
+    // player who stayed got nothing.
     const instance = await createInstance({
       matchData: { v: 1 },
       allowLateJoin: true,
@@ -264,6 +280,38 @@ describe('per-instance options — the six that used to be dropped', () => {
       setTimeout(() => resolve('no-finish'), 3000);
     });
     b.close();
+    expect(await reason).toBe('abandon_timeout');
+  });
+
+  it('and does not arm it while the dropped player is still inside the window', async () => {
+    // The other half of the same fix: a player who comes back before the window closes is
+    // never abandoned, so the seat never frees and the deadline is never armed. Without
+    // this, "arm it on abandon" could have been passed by arming it on disconnect.
+    const instance = await createInstance({
+      matchData: { v: 1 },
+      allowLateJoin: true,
+      abandonMatchTimeoutSeconds: 1,
+      disconnectAbandonTimeoutSeconds: 2,
+    });
+    const a = connect(instance.id, 'u1');
+    const b = connect(instance.id, 'u2');
+    sockets.push(a, b);
+    await Promise.all([joined(a), joined(b)]);
+
+    const reason = new Promise<string>((resolve) => {
+      a.on('on-finish', (d: { reason?: string }) => resolve(d?.reason ?? ''));
+      setTimeout(() => resolve('no-finish'), 2500);
+    });
+
+    b.close();
+    await delay(400);
+    const bAgain = connect(instance.id, 'u2');
+    sockets.push(bAgain);
+    // A reconnect is not a join: the gateway routes it to `handlePlayerReconnect` and
+    // returns, so no second `on-match-context` is ever sent. The socket connecting is the
+    // signal there is; the assertion below is what proves the server took it as a return.
+    await connected(bAgain);
+
     expect(await reason).toBe('no-finish');
   });
 });

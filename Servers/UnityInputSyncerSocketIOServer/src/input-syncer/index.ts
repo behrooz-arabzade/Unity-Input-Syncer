@@ -7,6 +7,7 @@ export { InputSyncerEvents } from './input-syncer-events';
 export { MatchGateway } from './match.gateway';
 export { AdminController } from './admin.controller';
 export { BearerAuthGuard } from './admin.guard';
+export * from './admin-auth';
 export { ServerInstance } from './server-instance';
 export * from './types';
 export * from './interfaces';

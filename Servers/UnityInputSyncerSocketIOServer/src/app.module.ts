@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { InputSyncerModule } from './input-syncer';
+import { readAdminAuthConfig } from './input-syncer/admin-auth';
 import { RewardOutcomeDeliveryMode } from './input-syncer/reward-delivery';
 import { NakamaModule } from './nakama/nakama.module';
 
@@ -79,9 +80,7 @@ function envRewardMode(): RewardOutcomeDeliveryMode {
         ),
         rewardOutcomeDelivery: envRewardMode(),
       },
-      admin: {
-        authToken: process.env.INPUT_SYNCER_ADMIN_AUTH_TOKEN ?? '',
-      },
+      admin: readAdminAuthConfig(),
     }),
     NakamaModule,
   ],

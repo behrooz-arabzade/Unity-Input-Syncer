@@ -218,7 +218,8 @@ Pool and defaults are driven by the same conceptual flags as the UTP multi-insta
 | `INPUT_SYNCER_SEND_HISTORY_ON_LATE_JOIN` | Send step history to late joiners. |
 | `INPUT_SYNCER_QUORUM_USER_FINISH_ENDS_MATCH` | Require all players to emit `user-finish` before match end when using that flow. |
 | `INPUT_SYNCER_ABANDON_MATCH_TIMEOUT` | If set, can end matches stuck waiting for players (see server implementation). |
-| `INPUT_SYNCER_ADMIN_AUTH_TOKEN` | If non-empty, admin routes require `Authorization: Bearer <token>`. |
+| `INPUT_SYNCER_ADMIN_AUTH_TOKEN` | Bearer token for admin routes. **Required by the Nest server**, which refuses to start without it; optional on the Unity server, where empty means no auth. |
+| `INPUT_SYNCER_ADMIN_AUTH_DISABLED` | Nest server only. `1`/`true` allows an unauthenticated admin API in place of a token. |
 | `INPUT_SYNCER_REWARD_OUTCOME_DELIVERY` | `0` = client-to-admin default; `1` / `2` = server hook modes (see `RewardOutcomeDeliveryMode` in server code). |
 
 `INPUT_SYNCER_EDITOR_LOG` can be set to a file path so Unity’s process launcher can tail logs across domain reloads.
@@ -264,6 +265,13 @@ var driverOptions = new SocketIODriverOptions
 ```
 
 Optional test hooks on `SocketIODriverOptions`: `FakeLatency`, `ConnectDelayMs`, `EmitMinDelayMs`, `EmitMaxDelayMs`, `JsonSerializerSettings`.
+
+**Reconnecting with the same driver.** `ConnectAsync()` may be called again after
+`DisconnectAsync()`. It disposes the previous socket, builds a new one, and re-binds every
+handler registered through `On(string, …)` onto it — the callbacks you registered before
+the first connect are still the callbacks that fire after the second. Before that re-bind
+existed, a second `ConnectAsync()` returned a connected socket that received no events at
+all, silently, and the only way to reconnect was to build a new driver.
 
 ---
 
@@ -625,11 +633,22 @@ Both the **UTP** multi-instance server (`AdminHttpServer` on `INPUT_SYNCER_ADMIN
 
 ### Authentication
 
-If `INPUT_SYNCER_ADMIN_AUTH_TOKEN` is set (Unity) or non-empty in Nest `AppModule`, every request must include:
+Every request must include:
 
 ```http
 Authorization: Bearer <token>
 ```
+
+**Socket.IO (Nest) server — the guard fails closed.** `INPUT_SYNCER_ADMIN_AUTH_TOKEN` is
+required: without it the process refuses to start, naming the variable, and `BearerAuthGuard`
+refuses every admin request. This matters because the admin API allocates match instances and
+**shares its port with the player WebSocket**, so restricting it is a path rule at the edge
+rather than a firewall rule — a deploy that forgot the variable used to publish an open
+allocator on the public port. An operator who genuinely wants an unauthenticated admin API
+sets `INPUT_SYNCER_ADMIN_AUTH_DISABLED=1`, which is a thing a deployment can be grepped for.
+
+**Unity (UTP) server — the token is still optional.** `AdminHttpServer` treats an empty
+`INPUT_SYNCER_ADMIN_AUTH_TOKEN` as no auth. Set it.
 
 ### Typical operator flow
 
@@ -778,11 +797,26 @@ Configure related behavior via env vars / `InputSyncerServerOptions`, **or per i
 create body**: `quorumUserFinishEndsMatch`, `abandonMatchTimeoutSeconds`,
 `sessionFinishMaxPayloadBytes`, `sessionFinishBroadcast`, `rejectInputAfterSessionFinish`.
 
-> **`abandonMatchTimeoutSeconds` only fires when `disconnectAbandonTimeoutSeconds` is 0.** A
-> dropped player is marked `abandoned` but is never *removed*, and the joined-player count does
-> not exclude an abandoned player — so with any non-zero disconnect window the abandon deadline
-> is never armed and a half-empty match runs until `INPUT_SYNCER_MAX_INSTANCE_LIFETIME`. This is
-> a known defect, not a design.
+**How the two timeouts compose (Socket.IO server).** They are consecutive, not alternatives.
+A dropped player is `disconnected` for `disconnectAbandonTimeoutSeconds`, during which they may
+reconnect and the match is untouched; when that window closes they are `abandoned`, an `abandon`
+entry goes into the step stream, and *only then* does `abandonMatchTimeoutSeconds` start. So a
+match one of whose players leaves ends as `abandon_timeout` after roughly the sum of the two.
+
+- An abandoned player's record stays in the players map — `findDisconnectedPlayerByUserId`
+  needs it — but stops occupying a seat, so the deadline is armed against the players still
+  actually in the match.
+- **An abandon is not reversible.** The marker is already in the step stream every client has
+  simulated, so a socket returning under that `userId` is treated as a new connection, not a
+  reconnect.
+- With `allowLateJoin` false there is no seat to refill, so an abandon ends the match at once
+  as `insufficient_players` rather than waiting out the deadline. If every seat is abandoned,
+  the match ends as `all_disconnected`.
+
+> Before `getActivePlayerCount` existed, a non-zero disconnect window meant the deadline was
+> never armed at all and such a match ran to `INPUT_SYNCER_MAX_INSTANCE_LIFETIME`. If you are
+> pinned to a commit older than that fix, `abandonMatchTimeoutSeconds` only works with
+> `disconnectAbandonTimeoutSeconds: 0`.
 
 ---
 

@@ -5,6 +5,10 @@ import { IoAdapter } from '@nestjs/platform-socket.io';
 import { io, Socket } from 'socket.io-client';
 import { AppModule } from '../src/app.module';
 
+/** Set by tests/setup/adminAuth.js — the guard fails closed without it (E08/S10). */
+const ADMIN_AUTH = `Bearer ${process.env.INPUT_SYNCER_ADMIN_AUTH_TOKEN ?? ''}`;
+
+
 /**
  * A match token used to be a *match* secret rather than a *player* secret: the token list was
  * a flat Set, the joining userId came from the client's own handshake query, and nothing
@@ -42,7 +46,10 @@ async function createInstance(
 ): Promise<{ id: string }> {
   const res = await fetch(`${baseUrl}/api/instances`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: ADMIN_AUTH,
+    },
     // matchData is what makes `on-match-context` carry something; it is emitted either way,
     // and it is this test file's proof that a socket really joined.
     body: JSON.stringify({
@@ -210,7 +217,10 @@ describe('match access — provisioning validation', () => {
   it('refuses a bound form whose two users share one token', async () => {
     const res = await fetch(`${baseUrl}/api/instances`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: ADMIN_AUTH,
+      },
       body: JSON.stringify({
         maxPlayers: 2,
         matchAccess: 'token',
@@ -224,7 +234,10 @@ describe('match access — provisioning validation', () => {
   it('refuses an empty bound form', async () => {
     const res = await fetch(`${baseUrl}/api/instances`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: ADMIN_AUTH,
+      },
       body: JSON.stringify({
         maxPlayers: 2,
         matchAccess: 'token',

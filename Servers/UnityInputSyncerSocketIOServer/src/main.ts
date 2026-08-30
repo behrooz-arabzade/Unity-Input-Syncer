@@ -4,6 +4,10 @@ import { INestApplication } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { IoAdapter } from '@nestjs/platform-socket.io';
 import { AppModule } from './app.module';
+import {
+  adminAuthMisconfigurationMessage,
+  readAdminAuthConfig,
+} from './input-syncer/admin-auth';
 
 const LOG = '[InputSyncerSocketIOServer]';
 
@@ -100,6 +104,15 @@ function installSignalHandlers(app: INestApplication): void {
 }
 
 async function bootstrap() {
+  // Before anything binds a port. An open allocator on a public port is the kind of
+  // mistake that is only ever found by someone else, so it is a startup failure here
+  // rather than a warning in a log nobody reads.
+  const misconfigured = adminAuthMisconfigurationMessage(readAdminAuthConfig());
+  if (misconfigured) {
+    console.error(`${LOG} ${misconfigured}`);
+    process.exit(1);
+  }
+
   const app = await NestFactory.create(AppModule);
 
   app.useWebSocketAdapter(new IoAdapter(app));

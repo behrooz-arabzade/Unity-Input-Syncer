@@ -6,6 +6,10 @@ import { io, Socket } from 'socket.io-client';
 import { randomUUID } from 'node:crypto';
 import { AppModule } from '../src/app.module';
 
+/** Set by tests/setup/adminAuth.js — the guard fails closed without it (E08/S10). */
+const ADMIN_AUTH = `Bearer ${process.env.INPUT_SYNCER_ADMIN_AUTH_TOKEN ?? ''}`;
+
+
 let app: INestApplication;
 let baseUrl: string;
 
@@ -41,7 +45,10 @@ interface InstanceInfo {
 async function createInstance(opts?: Record<string, unknown>): Promise<InstanceInfo> {
   const res = await fetch(`${baseUrl}/api/instances`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: ADMIN_AUTH,
+    },
     body: JSON.stringify({
       maxPlayers: 2,
       autoStartWhenFull: true,

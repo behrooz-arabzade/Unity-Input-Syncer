@@ -3,7 +3,10 @@ import type { Config } from 'jest';
 const config: Config = {
   preset: 'ts-jest',
   testEnvironment: 'node',
-  setupFiles: ['<rootDir>/tests/setup/cryptoPolyfill.js'],
+  setupFiles: [
+    '<rootDir>/tests/setup/cryptoPolyfill.js',
+    '<rootDir>/tests/setup/adminAuth.js',
+  ],
   testMatch: ['<rootDir>/tests/**/*.test.ts'],
   testPathIgnorePatterns: ['<rootDir>/tests/setup/'],
   testTimeout: 30000,

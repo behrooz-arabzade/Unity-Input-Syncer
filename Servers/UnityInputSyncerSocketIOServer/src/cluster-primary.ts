@@ -10,6 +10,10 @@ import httpProxy from 'http-proxy';
 import * as os from 'os';
 import * as path from 'path';
 import { URL } from 'url';
+import {
+  adminAuthMisconfigurationMessage,
+  readAdminAuthConfig,
+} from './input-syncer/admin-auth';
 
 const LOG = '[InputSyncerCluster]';
 const INTERNAL_HEADER = 'x-input-syncer-internal';
@@ -262,6 +266,15 @@ function installEditorLogMirror(): void {
 installEditorLogMirror();
 
 async function main(): Promise<void> {
+  // The primary proxies the admin API to the workers, which each hold the real guard.
+  // Checking here too costs nothing and turns "every worker died on boot" into one line
+  // naming the variable.
+  const misconfigured = adminAuthMisconfigurationMessage(readAdminAuthConfig());
+  if (misconfigured) {
+    console.error(`${LOG} ${misconfigured}`);
+    process.exit(1);
+  }
+
   const publicPort = envInt('INPUT_SYNCER_PORT', 3000);
   const cpu = os.cpus().length;
   const workerCount = Math.max(

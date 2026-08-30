@@ -466,6 +466,7 @@ export class InputSyncerServer {
     });
 
     this.onPlayerAbandoned(player);
+    this.checkMatchAbandonAfterPlayerAbandoned();
   }
 
   findDisconnectedPlayerByUserId(userId: string): InputSyncerPlayer | undefined {
@@ -483,6 +484,20 @@ export class InputSyncerServer {
 
   getJoinedPlayerCount(): number {
     return [...this.state.players.values()].filter((p) => p.joined).length;
+  }
+
+  /**
+   * Seats a match is still being played in. `getJoinedPlayerCount` deliberately counts an
+   * abandoned player too — `handleJoin`'s full-match check and
+   * `checkMatchAbandonAfterPlayerRemoved`'s `joined === 0` test both read it and mean
+   * "has a seat record" by it. The abandon deadline means something else: how many players
+   * are still *in* the match. A player inside the disconnect window is still one of them;
+   * they may come back. An abandoned player is not, and never will be.
+   */
+  getActivePlayerCount(): number {
+    return [...this.state.players.values()].filter(
+      (p) => p.joined && !p.abandoned,
+    ).length;
   }
 
   getPlayers(): InputSyncerPlayer[] {
@@ -560,6 +575,30 @@ export class InputSyncerServer {
     });
 
     this.onPlayerAbandoned(player);
+    this.checkMatchAbandonAfterPlayerAbandoned();
+  }
+
+  /**
+   * An abandoned player has left the match in every sense except that their record stays in
+   * `players` — `findDisconnectedPlayerByUserId` needs it, and removing them would break
+   * reconnect. So abandoning has to reach the same decisions `removePlayer` reaches, or a
+   * seat that is empty in fact goes on reading as filled and the deadline is never armed.
+   */
+  private checkMatchAbandonAfterPlayerAbandoned(): void {
+    if (!this.state.matchStarted || this.state.matchFinished) return;
+
+    const active = this.getActivePlayerCount();
+    if (active === 0) {
+      this.finishMatch(InputSyncerFinishReasons.AllDisconnected);
+      return;
+    }
+
+    if (!this.options.allowLateJoin && active < this.options.maxPlayers) {
+      this.finishMatch(InputSyncerFinishReasons.InsufficientPlayers);
+      return;
+    }
+
+    this.updateAbandonDeadline();
   }
 
   private updateAbandonDeadline(): void {
@@ -577,8 +616,8 @@ export class InputSyncerServer {
       return;
     }
 
-    const joined = this.getJoinedPlayerCount();
-    if (joined > 0 && joined < this.options.maxPlayers) {
+    const active = this.getActivePlayerCount();
+    if (active > 0 && active < this.options.maxPlayers) {
       this.abandonDeadlineMs =
         Date.now() + this.options.abandonMatchTimeoutSeconds * 1000;
     } else {
