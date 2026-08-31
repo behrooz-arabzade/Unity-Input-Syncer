@@ -221,8 +221,35 @@ Pool and defaults are driven by the same conceptual flags as the UTP multi-insta
 | `INPUT_SYNCER_ADMIN_AUTH_TOKEN` | Bearer token for admin routes. **Required by the Nest server**, which refuses to start without it; optional on the Unity server, where empty means no auth. |
 | `INPUT_SYNCER_ADMIN_AUTH_DISABLED` | Nest server only. `1`/`true` allows an unauthenticated admin API in place of a token. |
 | `INPUT_SYNCER_REWARD_OUTCOME_DELIVERY` | `0` = client-to-admin default; `1` / `2` = server hook modes (see `RewardOutcomeDeliveryMode` in server code). |
+| `INPUT_SYNCER_LOG_UPLOAD_KEEP_LAST_TYPES` | Nest server only. Comma-separated input `type` values whose stream is **thinned to each user's last entry** before the match's step history is uploaded to Nakama. Default `state-hash`; set it empty to upload the history whole. See "Uploading the input log" below — the default exists because the whole history does not fit. |
+| `INPUT_SYNCER_LOG_UPLOAD_FIELDS` | Nest server only. Comma-separated envelope fields carried in the upload — the message as its sender sent it, not this server's per-message handling state (`index`, `requestStep`, the cast timers, the force/cancel flags), which measured at 200 of an envelope's 297 bytes. Default `type,userId,data`; set it empty to send whole envelopes. |
+| `INPUT_SYNCER_LOG_UPLOAD_MAX_BYTES` | Nest server only. The size the upload is expected to stay under, default `262144` (Nakama's `socket.max_request_size_bytes` default). Exceeding it does not stop the attempt; it logs an **error** naming the byte count, so a body that outgrows the cap says so instead of disappearing. |
 
 `INPUT_SYNCER_EDITOR_LOG` can be set to a file path so Unity’s process launcher can tail logs across domain reloads.
+
+#### Uploading the input log
+
+On match finish the Nest server POSTs the instance's step history to Nakama for replay
+reconstruction. **The whole history does not fit.** Nakama's HTTP gateway caps a request body at
+262,144 bytes (`socket.max_request_size_bytes`), and a lockstep client publishing an in-band
+state hash every step costs roughly 700 bytes a step — so a **26-second** match is already over
+the cap, a 3.5-minute one is 1.4 MB, and a match at the 30-minute lifetime cap is ~12.6 MB.
+Measured 2026-08-31. The upload is fire-and-forget, so every one of those was refused *silently*:
+a logged 400 and nothing else.
+
+`INPUT_SYNCER_LOG_UPLOAD_KEEP_LAST_TYPES` is the fix, and raising the cap is not: the body grows
+with the clock, so any cap is a wall a longer match eventually hits, the same silent way. Thinning
+a repetitive, recomputable stream to each user's **last** entry leaves a body that scales with a
+match's *inputs* — turns, not steps — which is tens of kilobytes at worst. Two invariants the
+receiver depends on are preserved: a kept entry stays at the step it was published on, and the
+highest step survives even when it empties, so "how long did the match run" is still readable.
+
+`INPUT_SYNCER_LOG_UPLOAD_FIELDS` finishes the job. Most of an envelope is this server's own
+per-message bookkeeping, which describes how a message was handled rather than what a player
+did, and an upload for replay reconstruction does not want it: projecting each entry to
+`type,userId,data` is a further 3x. The point of that last factor is *which limit binds* — a
+receiver storing these has a size policy of its own, and after this the transport comfortably
+exceeds it, so an over-long match is refused by a deliberate choice instead of by the pipe.
 
 ### Multi-core cluster (one machine)
 
