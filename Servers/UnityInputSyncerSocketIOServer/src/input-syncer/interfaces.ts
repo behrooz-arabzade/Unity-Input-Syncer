@@ -31,6 +31,19 @@ export interface InputSyncerServerOptions {
   matchData?: unknown;
   /** Per-userId simulation payloads from admin create. */
   users?: Record<string, unknown>;
+  /**
+   * Seats no socket holds, each spoken for by one seated user:
+   * `{ "<seatUserId>": "<speakerUserId>" }`.
+   *
+   * An input the speaker's socket sends with `asUserId: "<seatUserId>"` is stamped with the seat's
+   * id rather than the speaker's, so the step stream reads as though the seat had sent it — the
+   * shape of a match against an opponent the speaker's own client plays (a bot). The relay still
+   * decides who sent what: `asUserId` is honoured only for a seat declared here *for that
+   * speaker*, and dropped otherwise. A proxy seat is not a player — it never joins, never counts
+   * toward `maxPlayers` or the user-finish quorum, has no disconnect window, and no socket may
+   * claim its user id.
+   */
+  proxySeats?: Record<string, string>;
   rewardOutcomeDelivery?: RewardOutcomeDeliveryMode;
   onRewardHookPerUser?: (payload: RewardPerUserHookPayload) => void;
   onRewardHookMatch?: (payload: RewardMatchHookPayload) => void;

@@ -813,6 +813,27 @@ lost its network sends nothing, and the server only learns of it from Socket.IO'
 - The new socket is sent what the old one had: `on-match-context` before the match starts, the
   whole history (`on-all-steps`) after it, as a reconnect would.
 
+### Proxy seats — a seat one player speaks for
+
+`proxySeats: { "<seatUserId>": "<speakerUserId>" }` in the create body declares seats **no socket
+holds**. The speaker's socket may send an input with `asUserId: "<seatUserId>"` inside `inputData`,
+and the server stamps it with the seat's id instead of the speaker's and strips `asUserId` — so the
+step stream reads exactly as though the seat had sent it. It is the shape of a match against an
+opponent the player's own client plays (a bot), relayed and paced like any other match.
+
+- **The server stays the authority on who sent what.** `asUserId` is honoured only for a seat
+  declared *for that speaker*; any other value drops the input rather than re-stamping it as the
+  sender's own. An instance with no `proxySeats` honours none, so in a two-person match nobody can
+  speak for the opponent.
+- **A proxy seat is not a player.** It never joins, never counts toward `maxPlayers` or the
+  `user-finish` quorum, and has no disconnect window: the speaker leaving is the only leaving. A
+  one-human match is `maxPlayers: 1` plus one proxy seat.
+- **No socket may claim a proxy seat's user id** — refused `match-access-denied` at the door and
+  on `join` — and the create body is a **400** if a seat has a bound token, speaks for itself, or
+  the map is not `{ id: id }`.
+- Put the seat in `users` like any other participant: the roster is what a client maps an input's
+  `userId` to a side with.
+
 ---
 
 ## Match finish & session APIs

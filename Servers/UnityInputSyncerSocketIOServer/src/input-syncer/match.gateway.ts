@@ -206,6 +206,20 @@ export class MatchGateway
       return;
     }
 
+    // A proxy seat is spoken for by another seated user and held by no socket (`proxySeats`).
+    const claimedUserId = firstQueryString(socket.handshake.query.userId);
+    if (claimedUserId && instance.server.isProxySeat(claimedUserId)) {
+      this.logger.warn(
+        `Socket ${socket.id} claimed proxy seat ${claimedUserId} in ${matchId} — refusing`,
+      );
+      socket.emit(InputSyncerEvents.INPUT_SYNCER_CONTENT_ERROR, {
+        reason: 'match-access-denied',
+        message: 'This seat cannot be joined',
+      });
+      socket.disconnect(true);
+      return;
+    }
+
     this.socketToInstance.set(socket.id, matchId);
 
     instance.server.sendToSocket = (

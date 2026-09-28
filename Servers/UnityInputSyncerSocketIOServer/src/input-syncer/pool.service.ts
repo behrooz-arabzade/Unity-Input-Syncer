@@ -35,6 +35,7 @@ function mergeServerOptions(
     'allowedMatchTokens',
     'matchData',
     'users',
+    'proxySeats',
     'rewardOutcomeDelivery',
     'onRewardHookPerUser',
     'onRewardHookMatch',

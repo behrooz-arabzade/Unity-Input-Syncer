@@ -48,6 +48,8 @@ type ResolvedServerOptions = {
   rewardOutcomeDelivery: RewardOutcomeDeliveryMode;
   matchData: unknown;
   users: Record<string, unknown>;
+  /** seatUserId → speakerUserId. Empty for a match every seat of which is a socket. */
+  proxySeats: Map<string, string>;
   onRewardHookPerUser?: (payload: RewardPerUserHookPayload) => void;
   onRewardHookMatch?: (payload: RewardMatchHookPayload) => void;
 };
@@ -98,9 +100,23 @@ function resolveOptions(o?: InputSyncerServerOptions): ResolvedServerOptions {
       !Array.isArray(o.users)
         ? { ...(o.users as Record<string, unknown>) }
         : {},
+    proxySeats: resolveProxySeats(o?.proxySeats),
     onRewardHookPerUser: o?.onRewardHookPerUser,
     onRewardHookMatch: o?.onRewardHookMatch,
   };
+}
+
+/** The declared seats as a map, ignoring any entry that is not two non-empty, different ids. */
+function resolveProxySeats(raw: Record<string, string> | undefined): Map<string, string> {
+  const seats = new Map<string, string>();
+  if (raw == null || typeof raw !== 'object' || Array.isArray(raw)) return seats;
+  for (const seat of Object.keys(raw)) {
+    const speaker = raw[seat];
+    if (seat.length === 0 || typeof speaker !== 'string' || speaker.length === 0) continue;
+    if (seat === speaker) continue;
+    seats.set(seat, speaker);
+  }
+  return seats;
 }
 
 /**
@@ -239,6 +255,15 @@ export class InputSyncerServer {
 
     const userId =
       (data?.userId as string) || defaultAnonymousUserId(socketId);
+    if (this.isProxySeat(userId)) {
+      // A proxy seat is spoken for, never held: a socket that could also claim it would give the
+      // seat two voices.
+      this.sendToSocket(socketId, InputSyncerEvents.INPUT_SYNCER_CONTENT_ERROR, {
+        reason: 'match-access-denied',
+        message: 'This seat cannot be joined',
+      });
+      return;
+    }
     player.userId = userId;
     player.joined = true;
 
@@ -280,21 +305,34 @@ export class InputSyncerServer {
     if (!data || typeof data !== 'object' || Array.isArray(data)) return;
 
     const inputData = data.inputData as Record<string, unknown> | undefined;
-    if (
-      inputData &&
-      typeof inputData === 'object' &&
-      !Array.isArray(inputData)
-    ) {
-      this.state.pendingInputs.push({
-        ...inputData,
-        userId: player.userId,
-      });
-    } else {
-      this.state.pendingInputs.push({
-        ...data,
-        userId: player.userId,
-      });
-    }
+    const payload =
+      inputData && typeof inputData === 'object' && !Array.isArray(inputData)
+        ? inputData
+        : data;
+
+    const stamp = this.stampFor(player, payload.asUserId);
+    if (stamp === null) return;
+
+    const input: Record<string, unknown> = { ...payload, userId: stamp };
+    delete input.asUserId;
+    this.state.pendingInputs.push(input);
+  }
+
+  /** Whether `userId` is a seat no socket holds (`proxySeats`). */
+  isProxySeat(userId: string): boolean {
+    return this.options.proxySeats.has(userId);
+  }
+
+  /**
+   * Who an input is stamped as: the sender, or — when it names one with `asUserId` — a proxy seat
+   * this sender speaks for. `null` drops the input: an `asUserId` that is not a seat declared for
+   * this speaker is a client trying to put a move on somebody else's side, and re-stamping it as
+   * the sender's own would be a guess about what it meant.
+   */
+  private stampFor(player: InputSyncerPlayer, asUserId: unknown): string | null {
+    if (asUserId === undefined || asUserId === null) return player.userId;
+    if (typeof asUserId !== 'string') return null;
+    return this.options.proxySeats.get(asUserId) === player.userId ? asUserId : null;
   }
 
   handleUserFinish(socketId: string): void {

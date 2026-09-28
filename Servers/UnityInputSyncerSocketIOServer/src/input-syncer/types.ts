@@ -64,6 +64,11 @@ export interface AdminCreateInstanceRequest {
   matchData?: unknown;
   users?: Record<string, unknown>;
   nakamaMatchId?: string;
+  /**
+   * `{ "<seatUserId>": "<speakerUserId>" }` — seats no socket holds, each spoken for by one seated
+   * user. See `InputSyncerServerOptions.proxySeats`.
+   */
+  proxySeats?: Record<string, string>;
 }
 
 /**
@@ -95,6 +100,7 @@ export const ADMIN_CREATE_INSTANCE_KEYS: readonly string[] = [
   'matchData',
   'users',
   'nakamaMatchId',
+  'proxySeats',
   // Accepted, never applied — allocator context.
   'participant_user_ids',
   'matchmaker',

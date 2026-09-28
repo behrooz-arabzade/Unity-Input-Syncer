@@ -47,6 +47,42 @@ function unknownBodyKeys(body?: AdminCreateInstanceRequest): string[] {
     : [`unknown field(s): ${unknown.join(', ')}`];
 }
 
+/**
+ * `proxySeats` is a map of non-empty user ids, no seat speaks for itself, and **no seat can be
+ * held by a socket**: with bound tokens a seat must not have one, because a seat that a socket
+ * could also claim would have two voices.
+ */
+function validateProxySeats(body?: AdminCreateInstanceRequest): string[] {
+  if (!body || body.proxySeats === undefined) return [];
+  const seats = body.proxySeats as unknown;
+  if (seats === null || typeof seats !== 'object' || Array.isArray(seats)) {
+    return ['proxySeats must be an object of { seatUserId: speakerUserId }'];
+  }
+  const errors: string[] = [];
+  const bound =
+    body.allowedMatchTokens != null &&
+    typeof body.allowedMatchTokens === 'object' &&
+    !Array.isArray(body.allowedMatchTokens)
+      ? (body.allowedMatchTokens as Record<string, string>)
+      : null;
+  for (const seat of Object.keys(seats as Record<string, unknown>)) {
+    const speaker = (seats as Record<string, unknown>)[seat];
+    if (seat.trim().length === 0 || typeof speaker !== 'string' || speaker.trim().length === 0) {
+      errors.push('proxySeats keys and values must be non-empty user ids');
+      break;
+    }
+    if (seat === speaker) {
+      errors.push(`proxySeats: ${seat} cannot speak for itself`);
+      break;
+    }
+    if (bound && Object.prototype.hasOwnProperty.call(bound, seat)) {
+      errors.push(`proxySeats: ${seat} has a match token, so a socket could hold it`);
+      break;
+    }
+  }
+  return errors;
+}
+
 function overridesFromCreateBody(
   body?: AdminCreateInstanceRequest,
 ): InputSyncerServerOptions | undefined {
@@ -82,6 +118,7 @@ function overridesFromCreateBody(
     o.allowedMatchTokens = body.allowedMatchTokens;
   if (body.matchData !== undefined) o.matchData = body.matchData;
   if (body.nakamaMatchId !== undefined) o.nakamaMatchId = body.nakamaMatchId;
+  if (body.proxySeats !== undefined) o.proxySeats = { ...body.proxySeats };
   if (body.users !== undefined) {
     o.users =
       body.users != null &&
@@ -137,6 +174,7 @@ export class AdminController {
     )
       errors.push('rewardOutcomeDelivery must be 0, 1 or 2');
 
+    errors.push(...validateProxySeats(body));
     errors.push(...validateAdminMatchAccess(body));
     errors.push(
       ...validateAdminMatchContext(body, this.pool.requireMatchUserDataOnCreate),
