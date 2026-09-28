@@ -445,6 +445,53 @@ export class InputSyncerServer {
     }
   }
 
+  /**
+   * Whether a new socket may take over the seat of a user who is still counted as connected.
+   *
+   * **Only when the handshake's user id is proven**, which is the bound token form: a token then
+   * admits exactly the user it was minted for, so the socket arriving with it *is* that user. In
+   * `open`, `password` or the unbound token form the user id is whatever the client typed, and a
+   * takeover would let anyone who can reach the match evict a player from their own seat.
+   */
+  canTakeOverSeats(): boolean {
+    return this.options.matchAccess === 'token' && this.options.matchTokens.byUser !== null;
+  }
+
+  /**
+   * A seated user arriving on a second socket while the first is still counted as connected.
+   *
+   * **This is a relaunch that beat the transport.** A killed process closes its socket and the
+   * server hears it at once, but a device that lost its network sends nothing: the server only
+   * learns the old socket is dead from its ping timeout, which is tens of seconds. A relaunch is
+   * faster than that, and without this the returning socket went down `handleJoin` and was told
+   * `match-full` by a match it is seated in.
+   *
+   * The seat moves to the new socket and nothing is written into the step stream: the player never
+   * left as far as the match is concerned, so there is no `disconnect` to pair a `reconnect` with.
+   * The new socket is sent what the old one had — the context before the match starts, the whole
+   * history after — exactly as a reconnect or a late join would be. Returns false, and changes
+   * nothing, when `oldSocketId` is not a seated, connected player.
+   */
+  handlePlayerTakeover(oldSocketId: string, newSocketId: string): boolean {
+    const player = this.state.players.get(oldSocketId);
+    if (!player || !player.joined || player.disconnected || player.abandoned) return false;
+
+    player.socketId = newSocketId;
+    this.state.players.delete(oldSocketId);
+    this.state.players.set(newSocketId, player);
+
+    if (!this.state.matchStarted) {
+      this.sendToSocket(newSocketId, InputSyncerEvents.INPUT_SYNCER_MATCH_CONTEXT_EVENT, {
+        matchId: this.options.matchInstanceId,
+        matchData: this.options.matchData ?? null,
+        users: this.options.users ?? {},
+      });
+    } else if (this.options.sendStepHistoryOnLateJoin) {
+      this.sendAllStepsToPlayer(newSocketId);
+    }
+    return true;
+  }
+
   handleManualAbandon(socketId: string): void {
     const player = this.state.players.get(socketId);
     if (!player || !player.joined || player.abandoned) return;
@@ -472,6 +519,16 @@ export class InputSyncerServer {
   findDisconnectedPlayerByUserId(userId: string): InputSyncerPlayer | undefined {
     for (const player of this.state.players.values()) {
       if (player.userId === userId && player.disconnected && !player.abandoned) {
+        return player;
+      }
+    }
+    return undefined;
+  }
+
+  /** A seated player whose socket is still counted as connected — the one a takeover replaces. */
+  findConnectedPlayerByUserId(userId: string): InputSyncerPlayer | undefined {
+    for (const player of this.state.players.values()) {
+      if (player.userId === userId && player.joined && !player.disconnected && !player.abandoned) {
         return player;
       }
     }

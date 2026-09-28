@@ -234,6 +234,21 @@ export class MatchGateway
         this.logger.log(`Socket ${socket.id} reconnected as ${queryUserId} to match ${matchId}`);
         return;
       }
+
+      // A relaunch the server has not yet noticed: the old socket is still counted as connected,
+      // so the reconnect branch above misses it and `handleJoin` would answer `match-full`.
+      // Only where the access check above has *proven* the user id (`canTakeOverSeats`).
+      if (instance.server.canTakeOverSeats()) {
+        const seated = instance.server.findConnectedPlayerByUserId(queryUserId);
+        if (seated) {
+          const oldSocketId = seated.socketId;
+          if (instance.server.handlePlayerTakeover(oldSocketId, socket.id)) {
+            this.supersede(oldSocketId);
+            this.logger.log(`Socket ${socket.id} took over ${queryUserId}'s seat in match ${matchId}`);
+            return;
+          }
+        }
+      }
     }
 
     instance.server.addPlayer(socket.id);
@@ -243,6 +258,26 @@ export class MatchGateway
     // stayed 0 and the match never started.
     instance.server.handleJoin(socket.id, joinPayloadFromQuery(socket.handshake.query));
     this.logger.log(`Socket ${socket.id} connected to match ${matchId}`);
+  }
+
+  /**
+   * Closes a socket whose seat a newer socket has taken. The map entry goes first, so the
+   * disconnect this causes reaches `handleDisconnect` as a socket that belongs to no instance —
+   * the seat it used to hold is not marked disconnected under the socket that now holds it.
+   */
+  private supersede(oldSocketId: string): void {
+    this.socketToInstance.delete(oldSocketId);
+    const old = this.server?.sockets?.sockets.get(oldSocketId);
+    if (!old) return;
+    try {
+      old.emit(InputSyncerEvents.INPUT_SYNCER_CONTENT_ERROR, {
+        reason: 'superseded',
+        message: 'This seat was taken over by a newer connection for the same user',
+      });
+    } catch (e) {
+      logGatewayError(this.logger, 'supersede emit', oldSocketId, e);
+    }
+    old.disconnect(true);
   }
 
   handleDisconnect(socket: Socket): void {

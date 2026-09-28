@@ -798,6 +798,21 @@ is keyed by the same claimed `userId`.
 Every refusal above reports `content-error` with reason **`match-access-denied`** and no detail
 about which check failed.
 
+### Seat takeover (bound tokens only)
+
+A socket arriving for a `userId` that is **seated and still counted as connected** takes that seat
+over, instead of being refused `match-full`. This is a client that relaunched faster than the
+server noticed its old socket die: a killed process closes its socket at once, but a device that
+lost its network sends nothing, and the server only learns of it from Socket.IO's ping timeout.
+
+- **Only with the bound token form**, where the handshake's `userId` is proven by its token. With
+  `open`, `password` or unbound tokens the `userId` is whatever the client typed, so nothing is
+  taken over and the second socket is refused exactly as before.
+- The old socket receives `content-error` with reason **`superseded`** and is closed. Its closing
+  marks nobody disconnected, and nothing is written into the step stream — the player never left.
+- The new socket is sent what the old one had: `on-match-context` before the match starts, the
+  whole history (`on-all-steps`) after it, as a reconnect would.
+
 ---
 
 ## Match finish & session APIs
